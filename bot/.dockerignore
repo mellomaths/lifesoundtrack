@@ -1,4 +1,6 @@
 .env
+.env.*
+.git
 *.md
-*_test.go
 **/*_test.go
+internal/core/*_test.go
