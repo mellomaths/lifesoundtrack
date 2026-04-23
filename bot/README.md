@@ -1,8 +1,12 @@
 # LifeSoundtrack `bot/`
 
-- **`internal/core`**: product strings and command semantics (no third-party chat SDKs).
+- **`internal/core`**: product strings, `/album` save flow, and command semantics (no third-party chat SDKs).
 - **`internal/adapter/telegram`**: first platform adapter; only this path imports `github.com/go-telegram/bot`.
-- **`cmd/bot`**: process entry, config, logging, wires the active adapter.
+- **`internal/store`**: PostgreSQL (`pgxpool`) and migrations ([Goose](https://github.com/pressly/goose)).
+- **`internal/metadata`**: MusicBrainz → Last.fm → iTunes chain behind `MetadataOrchestrator`.
+- **`cmd/bot`**: process entry, config, logging, wires the active adapter and database.
+
+Feature **003** (save album): [specs/003-save-album-command/quickstart.md](../specs/003-save-album-command/quickstart.md).
 
 ## Develop
 
@@ -14,7 +18,16 @@ go test ./... -count=1
 go run ./cmd/bot
 ```
 
-`TELEGRAM_BOT_TOKEN` is required. At startup the process loads **`./.env`** from the **current working directory** (optional; missing file is OK). Environment variables already set in the shell **take precedence** over values in `.env`. See [`.env.example`](./.env.example), [002 quickstart](../specs/002-env-file-config/quickstart.md), and [001 runbook](../specs/001-lifesoundtrack-bot-commands/quickstart.md).
+`TELEGRAM_BOT_TOKEN` and `DATABASE_URL` are required. Optional `AUTO_MIGRATE=true` runs SQL migrations at startup; otherwise run Goose yourself against `DATABASE_URL` (migrations in [`migrations/`](./migrations/)):
+
+```bash
+go install github.com/pressly/goose/v3/cmd/goose@latest
+goose -dir ./migrations postgres "$DATABASE_URL" up
+```
+
+If you previously applied migrations with **golang-migrate** on this database, reset the DB or use a new database before switching: Goose tracks versions in `goose_db_version`, not `schema_migrations`.
+
+At startup the process loads **`./.env`** from the **current working directory** (optional; missing file is OK). Environment variables already set in the shell **take precedence** over values in `.env`. See [`.env.example`](./.env.example), [002 quickstart](../specs/002-env-file-config/quickstart.md), [001 runbook](../specs/001-lifesoundtrack-bot-commands/quickstart.md), and the **003** link above.
 
 ### Hot reload (optional)
 

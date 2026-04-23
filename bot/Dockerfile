@@ -10,5 +10,7 @@ RUN go build -trimpath -ldflags="-s -w" -o /out/bot ./cmd/bot
 FROM alpine:3.20
 RUN apk add --no-cache ca-certificates
 COPY --from=build /out/bot /usr/local/bin/bot
+COPY --from=build /src/migrations /migrations
 USER nobody
+ENV MIGRATIONS_PATH=/migrations
 ENTRYPOINT ["/usr/local/bin/bot"]

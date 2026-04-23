@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strconv"
+	"strings"
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -11,12 +13,25 @@ import (
 	"github.com/mellomaths/lifesoundtrack/bot/internal/core"
 )
 
-// Run starts long-polling the Telegram API and dispatches private 1:1 text messages
-// into [core] for replies. Non-private and non-text updates are ignored.
-func Run(ctx context.Context, log *slog.Logger, token string) error {
+const platformSource = "telegram"
+
+// Run starts long-polling. Private 1:1 text and callback queries for album disambig.
+func Run(ctx context.Context, log *slog.Logger, token string, save *core.SaveService) error {
+	if save == nil {
+		return fmt.Errorf("nil save service")
+	}
 	opts := []bot.Option{
 		bot.WithDefaultHandler(func(tctx context.Context, b *bot.Bot, u *models.Update) {
-			handleUpdate(tctx, log, b, u)
+			if u == nil {
+				return
+			}
+			if u.CallbackQuery != nil {
+				handleCallback(tctx, log, b, u.CallbackQuery, save)
+				return
+			}
+			if u.Message != nil {
+				handleMessage(tctx, log, b, u.Message, save)
+			}
 		}),
 	}
 	tb, err := bot.New(token, opts...)
@@ -28,29 +43,134 @@ func Run(ctx context.Context, log *slog.Logger, token string) error {
 	return nil
 }
 
-func handleUpdate(ctx context.Context, log *slog.Logger, b *bot.Bot, u *models.Update) {
-	if u == nil || u.Message == nil {
+func handleCallback(ctx context.Context, log *slog.Logger, b *bot.Bot, q *models.CallbackQuery, save *core.SaveService) {
+	if q == nil || q.From.ID == 0 {
 		return
 	}
-	msg := u.Message
+	chatID, ok := callbackChatID(q)
+	if !ok {
+		_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{CallbackQueryID: q.ID})
+		return
+	}
+	if !strings.HasPrefix(q.Data, "apick:") {
+		_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{CallbackQueryID: q.ID})
+		return
+	}
+	suffix := strings.TrimPrefix(q.Data, "apick:")
+	n, err := strconv.Atoi(suffix)
+	if err != nil || n < 1 || n > 3 {
+		_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{CallbackQueryID: q.ID})
+		return
+	}
+	ext, disp, u := userIdentity(&q.From)
+	um, err := save.ProcessPickByIndex(ctx, platformSource, ext, disp, u, n)
+	if err != nil {
+		log.Error("callback pick", "err", err)
+		_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{CallbackQueryID: q.ID, Text: "Could not complete that.", ShowAlert: true})
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, Text: internalErrCopy()})
+		return
+	}
+	_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{CallbackQueryID: q.ID})
+	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, Text: um.Text})
+}
+
+func callbackChatID(q *models.CallbackQuery) (any, bool) {
+	if q == nil {
+		return 0, false
+	}
+	switch q.Message.Type {
+	case models.MaybeInaccessibleMessageTypeMessage:
+		if q.Message.Message != nil {
+			return q.Message.Message.Chat.ID, true
+		}
+	case models.MaybeInaccessibleMessageTypeInaccessibleMessage:
+		if q.Message.InaccessibleMessage != nil {
+			return q.Message.InaccessibleMessage.Chat.ID, true
+		}
+	}
+	return 0, false
+}
+
+func handleMessage(ctx context.Context, log *slog.Logger, b *bot.Bot, msg *models.Message, save *core.SaveService) {
+	if msg == nil || msg.From == nil {
+		return
+	}
 	if msg.Chat.Type != models.ChatTypePrivate {
 		return
 	}
 	if msg.Text == "" {
-		// e.g. sticker/photo: no product requirement to reply; ignore.
+		return
+	}
+	chatID := msg.Chat.ID
+	text := msg.Text
+	ext, disp, u := userIdentity(msg.From)
+
+	if q, isAlbum := core.ParseAlbumLine(text); isAlbum {
+		um, err := save.ProcessAlbumQuery(ctx, platformSource, ext, disp, u, q)
+		if err != nil {
+			log.Error("save album", "err", err)
+			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, Text: internalErrCopy()})
+			return
+		}
+		params := &bot.SendMessageParams{ChatID: chatID, Text: um.Text}
+		if um.Outcome == core.OutcomeDisambig && um.PickCount > 0 {
+			params.ReplyMarkup = disambigKeyboard(um.PickCount)
+		}
+		_, _ = b.SendMessage(ctx, params)
 		return
 	}
 
-	cmd := core.ParseTextMessage(msg.Text)
-	reply := core.Reply(cmd)
-	// No message body, no token: domain command and chat id for operator traces only.
-	log.Info("private message", "domain_command", cmd.String(), "chat_id", msg.Chat.ID)
-
-	_, err := b.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID: msg.Chat.ID,
-		Text:   reply,
-	})
-	if err != nil {
-		log.Error("send message", "err", err, "domain_command", cmd.String(), "chat_id", msg.Chat.ID)
+	if n, ok := core.OneBasedPickFromText(text); ok {
+		um, err := save.ProcessPickByIndex(ctx, platformSource, ext, disp, u, n)
+		if err != nil {
+			log.Error("pick", "err", err)
+			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, Text: internalErrCopy()})
+			return
+		}
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, Text: um.Text})
+		return
 	}
+
+	cmd := core.ParseTextMessage(text)
+	reply := core.Reply(cmd)
+	log.Info("private message", "domain_command", cmd.String(), "chat_id", chatID)
+	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, Text: reply})
+}
+
+func disambigKeyboard(n int) *models.InlineKeyboardMarkup {
+	if n < 1 {
+		n = 1
+	}
+	if n > 3 {
+		n = 3
+	}
+	row := make([]models.InlineKeyboardButton, 0, n)
+	for i := 1; i <= n; i++ {
+		row = append(row, models.InlineKeyboardButton{
+			Text:         strconv.Itoa(i),
+			CallbackData: "apick:" + strconv.Itoa(i),
+		})
+	}
+	return &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{row}}
+}
+
+func userIdentity(u *models.User) (externalID, display, username string) {
+	if u == nil {
+		return "", "", ""
+	}
+	externalID = strconv.FormatInt(u.ID, 10)
+	parts := make([]string, 0, 2)
+	if strings.TrimSpace(u.FirstName) != "" {
+		parts = append(parts, strings.TrimSpace(u.FirstName))
+	}
+	if strings.TrimSpace(u.LastName) != "" {
+		parts = append(parts, strings.TrimSpace(u.LastName))
+	}
+	display = strings.Join(parts, " ")
+	username = strings.TrimSpace(u.Username)
+	return externalID, display, username
+}
+
+func internalErrCopy() string {
+	return "Something went wrong. Please try again in a bit."
 }

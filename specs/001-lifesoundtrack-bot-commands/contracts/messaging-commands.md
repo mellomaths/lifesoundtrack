@@ -21,6 +21,8 @@ This is the **behavioral contract** for **domain** behavior. It is **not** bound
 
 **Adapter note**: The **host** may show these as `/start`, `/help`, `/ping` or with different prefixes or UI. The **domain** must still recognize the three behaviors above through the adapter mapping.
 
+**Amendment (003 / save album)**: The product adds domain **`save_album`** (free-form text query), mapped in Telegram to **`/album <query>`** and related pick flows. See [specs/003-save-album-command/contracts/album-command.md](../../003-save-album-command/contracts/album-command.md) for outcomes and host mapping. v1 of **this** 001 table remains about **start / help / ping**; the 003 spec is the source of truth for the album feature.
+
 ## Fallback (unknown input)
 
 When the user’s message does not map to a known domain command, send a **short hint to use help** (or the platform-appropriate “help” action), if the host allows a reply in that context.

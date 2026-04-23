@@ -5,7 +5,7 @@ alwaysApply: true
 <!-- SPECKIT START -->
 For additional context about technologies, project structure, and shell commands,
 read the **active** implementation plan (`.specify/feature.json` points to the current feature; example:
-[`specs/002-env-file-config/plan.md`](../../specs/002-env-file-config/plan.md) for env + local reload work),
+[`specs/003-save-album-command/plan.md`](../../specs/003-save-album-command/plan.md) for save-album + metadata + Postgres),
 and the feature **001** sandbox runbook at
 [`specs/001-lifesoundtrack-bot-commands/quickstart.md`](../../specs/001-lifesoundtrack-bot-commands/quickstart.md)
 for core Telegram / domain behavior.
