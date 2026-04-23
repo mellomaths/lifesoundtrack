@@ -1,7 +1,7 @@
+.git
 .env
 .env.*
-tmp/
-.git
-*.md
-**/*_test.go
-internal/core/*_test.go
+*.log
+dist/
+node_modules/
+coverage/

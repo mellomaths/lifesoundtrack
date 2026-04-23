@@ -9,6 +9,6 @@ The Go module at [`bot/`](bot/) implements the feature [001-lifesoundtrack-bot-c
 - **`bot/internal/core`** — domain command handling and all user-visible copy (platform-agnostic).
 - **`bot/internal/adapter/telegram`** — first messaging adapter (long polling); the only package that imports `github.com/go-telegram/bot`.
 
-**Run locally:** create `bot/.env` or export `TELEGRAM_BOT_TOKEN`, then `cd bot && go run ./cmd/bot`. **Docker:** from the repo root, `docker compose build bot && docker compose up bot` (see [`compose.yaml`](compose.yaml)) — the image does not rely on a local `.env` file; pass env at runtime as usual.
+**Run locally:** create `bot/.env` or export `TELEGRAM_BOT_TOKEN` and `DATABASE_URL` (e.g. local Postgres; `docker compose up -d` starts one), then `cd bot && go run ./cmd/bot`. **Save-album (003):** [specs/003-save-album-command/quickstart.md](specs/003-save-album-command/quickstart.md). **Docker:** from the repo root, `docker compose up --build` runs Postgres and the bot with `AUTO_MIGRATE` (see [`compose.yaml`](compose.yaml)) — pass `TELEGRAM_BOT_TOKEN` in the environment; `DATABASE_URL` defaults for the stack when unset.
 
 **Config file loading & dev workflow:** [specs/002-env-file-config/quickstart.md](specs/002-env-file-config/quickstart.md). **Sandbox runbook and acceptance (commands):** [specs/001-lifesoundtrack-bot-commands/quickstart.md](specs/001-lifesoundtrack-bot-commands/quickstart.md).

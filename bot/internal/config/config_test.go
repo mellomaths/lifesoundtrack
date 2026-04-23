@@ -27,12 +27,13 @@ func TestLoadLocalDotEnv_ValidFileSetsVariables(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir("/") })
 
-	contents := "TELEGRAM_BOT_TOKEN=fromfile\nLOG_LEVEL=DEBUG\n"
+	contents := "TELEGRAM_BOT_TOKEN=fromfile\nDATABASE_URL=postgres://l:p@h:1/db?sslmode=disable\nLOG_LEVEL=DEBUG\n"
 	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte(contents), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
 		_ = os.Unsetenv("TELEGRAM_BOT_TOKEN")
+		_ = os.Unsetenv("DATABASE_URL")
 		_ = os.Unsetenv("LOG_LEVEL")
 	})
 
@@ -64,9 +65,13 @@ func TestLoadLocalDotEnv_OSEnvironmentTakesPrecedence(t *testing.T) {
 	// godotenv does not override existing os.Getenv keys by default.
 	// We set token in env before load; file has different token; env wins.
 	t.Setenv("TELEGRAM_BOT_TOKEN", "from_os")
-	t.Cleanup(func() { _ = os.Unsetenv("TELEGRAM_BOT_TOKEN") })
+	t.Setenv("DATABASE_URL", "postgres://l:p@h:1/db?sslmode=disable")
+	t.Cleanup(func() {
+		_ = os.Unsetenv("TELEGRAM_BOT_TOKEN")
+		_ = os.Unsetenv("DATABASE_URL")
+	})
 
-	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("TELEGRAM_BOT_TOKEN=fromfile\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("TELEGRAM_BOT_TOKEN=fromfile\nDATABASE_URL=postgres://a:b@h:1/d?sslmode=disable\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -106,6 +111,8 @@ func TestFromEnv_RequiresToken(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chdir("/") })
 	// Inherit a clean state: any token in the parent would satisfy FromEnv.
 	t.Setenv("TELEGRAM_BOT_TOKEN", "")
+	t.Setenv("DATABASE_URL", "postgres://l:p@h:1/db?sslmode=disable")
+	t.Cleanup(func() { _ = os.Unsetenv("DATABASE_URL") })
 
 	_, err := config.FromEnv()
 	if err == nil {
@@ -123,7 +130,11 @@ func TestLoadLocalDotEnv_NoFile_TokenFromOSEnly(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir("/") })
 	t.Setenv("TELEGRAM_BOT_TOKEN", "os_only")
-	t.Cleanup(func() { _ = os.Unsetenv("TELEGRAM_BOT_TOKEN") })
+	t.Setenv("DATABASE_URL", "postgres://l:p@h:1/db?sslmode=disable")
+	t.Cleanup(func() {
+		_ = os.Unsetenv("TELEGRAM_BOT_TOKEN")
+		_ = os.Unsetenv("DATABASE_URL")
+	})
 
 	if err := config.LoadLocalDotEnv(); err != nil {
 		t.Fatalf("load: %v", err)
@@ -145,10 +156,11 @@ func TestLoadLocalDotEnv_CommentAndCRLF(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chdir("/") })
 	t.Cleanup(func() {
 		_ = os.Unsetenv("TELEGRAM_BOT_TOKEN")
+		_ = os.Unsetenv("DATABASE_URL")
 		_ = os.Unsetenv("LOG_LEVEL")
 	})
 	// CRLF + # line (library behavior: token still loads)
-	contents := "# comment\r\nTELEGRAM_BOT_TOKEN=from_crlf\r\nLOG_LEVEL=INFO\r\n"
+	contents := "# comment\r\nTELEGRAM_BOT_TOKEN=from_crlf\r\nDATABASE_URL=postgres://l:p@h:1/db?sslmode=disable\r\nLOG_LEVEL=INFO\r\n"
 	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte(contents), 0o600); err != nil {
 		t.Fatal(err)
 	}

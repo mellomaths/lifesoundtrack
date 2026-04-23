@@ -43,8 +43,9 @@ func TestReply(t *testing.T) {
 	if s := Reply(CommandHelp); !strings.Contains(s, productName) {
 		t.Errorf("help reply must include %q, got: %q", productName, s)
 	}
-	if !strings.Contains(Reply(CommandHelp), "/start") || !strings.Contains(Reply(CommandHelp), "/help") || !strings.Contains(Reply(CommandHelp), "/ping") {
-		t.Errorf("help must list three commands, got: %q", Reply(CommandHelp))
+	help := Reply(CommandHelp)
+	if !strings.Contains(help, "/start") || !strings.Contains(help, "/help") || !strings.Contains(help, "/ping") || !strings.Contains(help, "/album") {
+		t.Errorf("help must list supported commands, got: %q", help)
 	}
 	if s := Reply(CommandPing); strings.TrimSpace(s) == "" {
 		t.Error("ping reply must be non-empty")
@@ -61,5 +62,36 @@ func TestCommandString(t *testing.T) {
 	t.Parallel()
 	if CommandStart.String() != "start" {
 		t.Errorf("got %q", CommandStart.String())
+	}
+}
+
+func TestParseAlbumLine(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		in, want string
+		ok       bool
+	}{
+		{"/album", "", true},
+		{"/album@bot", "", true},
+		{"/album   ", "", true},
+		{"/album Red", "Red", true},
+		{"/ALBUM  Red  Hot", "Red  Hot", true},
+		{"/start", "", false},
+		{"", "", false},
+	}
+	for _, tc := range cases {
+		if got, ok := ParseAlbumLine(tc.in); ok != tc.ok || (tc.ok && got != tc.want) {
+			t.Errorf("ParseAlbumLine(%q) = %q, %v want %q, %v", tc.in, got, ok, tc.want, tc.ok)
+		}
+	}
+}
+
+func TestOneBasedPickFromText(t *testing.T) {
+	t.Parallel()
+	if n, ok := OneBasedPickFromText("2"); !ok || n != 2 {
+		t.Errorf("2: got %d %v", n, ok)
+	}
+	if _, ok := OneBasedPickFromText("12"); ok {
+		t.Error("12 should not be a pick")
 	}
 }

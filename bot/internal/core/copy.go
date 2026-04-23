@@ -6,13 +6,15 @@ const productName = "LifeSoundtrack"
 
 var (
 	startCopy = "Welcome to " + productName + ". I'm glad you're here — this is a private space for your music journey. " +
-		"Use /help to see what I can do, or /ping if you just want a quick liveness check."
+		"Use /help to see what I can do, or /ping if you just want a quick liveness check. " +
+		"Try /album with a free-text search to save a record you care about."
 
 	helpCopy = productName + "\n\n" +
 		"Here is what I support right now (same in any chat client we connect):\n" +
 		"• /start — short welcome and where you are\n" +
 		"• /help — this list, with " + productName + " in context\n" +
-		"• /ping — a tiny liveness line so you know I'm responding\n"
+		"• /ping — a tiny liveness line so you know I'm responding\n" +
+		"• /album <search> — look up and save a release to your list (free text)\n"
 
 	pingCopy = "pong — " + productName + " is up."
 
