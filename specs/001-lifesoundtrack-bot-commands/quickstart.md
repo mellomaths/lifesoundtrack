@@ -13,7 +13,7 @@ The **product rules** in [spec.md](spec.md) and [contracts/messaging-commands.md
 
 ## 1. Configure environment
 
-Create **`bot/.env`** (or export in your shell). **Do not commit secrets.**
+Create **`bot/.env`** (or export in your shell). **Do not commit secrets.** For **load order**, **`.env` location**, and optional **air** hot reload, see [002 — env & dev reload](../002-env-file-config/quickstart.md).
 
 ```bash
 # Required for the Telegram adapter; see [bot/.env.example](../../bot/.env.example)

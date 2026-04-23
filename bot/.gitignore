@@ -6,6 +6,10 @@
 
 # Go
 vendor/
+tmp/
+
+# air (local)
+build-errors.log
 
 # Local env
 .env

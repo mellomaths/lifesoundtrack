@@ -1,0 +1,16 @@
+# Local dev: hot rebuild on Go and .env changes (see specs/002-env-file-config/quickstart.md).
+# Install: go install github.com/air-verse/air@latest (version need not match Go modules).
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  cmd = "go build -o ./tmp/bot ./cmd/bot"
+  bin = "./tmp/bot"
+  delay = 500
+  exclude_dir = ["tmp", "vendor"]
+  include_ext = ["go", "env"]
+  exclude_regex = ["_test\\.go$"]
+  exclude_unchanged = true
+  follow_symlink = false
+  send_interrupt = true
+  stop_on_error = true

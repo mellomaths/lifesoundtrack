@@ -12,6 +12,10 @@ import (
 )
 
 func main() {
+	if err := config.LoadLocalDotEnv(); err != nil {
+		slog.Error("config bootstrap failed", "reason", "dotenv", "err", err)
+		os.Exit(1)
+	}
 	cfg, err := config.FromEnv()
 	if err != nil {
 		slog.Error("config", "err", err)
