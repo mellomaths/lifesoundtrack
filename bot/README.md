@@ -14,7 +14,19 @@ go test ./... -count=1
 go run ./cmd/bot
 ```
 
-`TELEGRAM_BOT_TOKEN` is required. See [`.env.example`](./.env.example) and the feature [quickstart](../specs/001-lifesoundtrack-bot-commands/quickstart.md).
+`TELEGRAM_BOT_TOKEN` is required. At startup the process loads **`./.env`** from the **current working directory** (optional; missing file is OK). Environment variables already set in the shell **take precedence** over values in `.env`. See [`.env.example`](./.env.example), [002 quickstart](../specs/002-env-file-config/quickstart.md), and [001 runbook](../specs/001-lifesoundtrack-bot-commands/quickstart.md).
+
+### Hot reload (optional)
+
+With [air](https://github.com/cosmtrek/air) installed (same pin as [002 quickstart](../specs/002-env-file-config/quickstart.md)), from `bot/`:
+
+```bash
+air
+```
+
+(`air` picks up `bot/.air.toml` in the current directory, or `air -c .air.toml` explicitly.)
+
+Watches `*.go` and `.env` under this module; CI and Docker use a normal `go build` / image build (no watcher).
 
 ## Lint (optional)
 
