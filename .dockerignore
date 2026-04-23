@@ -1,0 +1,9 @@
+.git
+.env
+.env.*
+**/.env
+**/.env.*
+specs/
+.specify/
+.cursor/
+*.md
