@@ -5,10 +5,12 @@ alwaysApply: true
 <!-- SPECKIT START -->
 For additional context about technologies, project structure, and shell commands,
 read the **active** feature from [`.specify/feature.json`](../../.specify/feature.json) (currently
-[`specs/004-daily-album-recommendations/spec.md`](../../specs/004-daily-album-recommendations/spec.md) and
-[`specs/004-daily-album-recommendations/plan.md`](../../specs/004-daily-album-recommendations/plan.md): daily fair picks from **`saved_albums`**, Telegram delivery, transactional **`last_recommended_at`** + **`recommendations`**, in-process **`robfig/cron`** + **`LST_DAILY_RECOMMENDATIONS_*`** env flags per [contracts/feature-flags.md](../../specs/004-daily-album-recommendations/contracts/feature-flags.md); **listener discovery** SQL must satisfy PostgreSQL (**FR-013**–**FR-015**, [research.md](../../specs/004-daily-album-recommendations/research.md) §8)); **in-process** daily scheduler in `bot/cmd/bot` must run alongside Telegram (**FR-017**–**FR-018**)).
+[`specs/005-save-album-spotify-url/spec.md`](../../specs/005-save-album-spotify-url/spec.md) and
+[`specs/005-save-album-spotify-url/plan.md`](../../specs/005-save-album-spotify-url/plan.md): **`/album`** keeps **FREE_TEXT** (**unchanged** **`Search`** chain + disambiguation from **003**) **and** adds **SPOTIFY_URL** / **SHORT_URL** (**FR-000**, **FR-008**): **bounded** redirect allowlist + **`LookupSpotifyAlbumByID`** on `metadata.Chain` (**GET /v1/albums/{id}**) for **direct** album resolution—**no** multi-album chooser for that turn when one album resolves (**including** **one** **unambiguous** link **embedded** in short surrounding text); **non-Spotify** HTTP URLs stay **FREE_TEXT**; see [contracts/spotify-album-url.md](../../specs/005-save-album-spotify-url/contracts/spotify-album-url.md) and [research.md](../../specs/005-save-album-spotify-url/research.md)).
 
 Also see [`specs/003-save-album-command/plan.md`](../../specs/003-save-album-command/plan.md) for save-album + **metadata** **chain** **Spotify→iTunes→Last.fm→MusicBrainz** with **`LST_METADATA_ENABLE_*`** + Postgres + disambiguation **(≤2 distinct `Title | Artist (Year)` lines + Other; dedupe same-label rows before prompt)**.
+
+[`specs/004-daily-album-recommendations/plan.md`](../../specs/004-daily-album-recommendations/plan.md) covers daily fair picks from **`saved_albums`**, **`LST_DAILY_RECOMMENDATIONS_*`**, and in-process cron.
 
 The feature **001** sandbox runbook is at
 [`specs/001-lifesoundtrack-bot-commands/quickstart.md`](../../specs/001-lifesoundtrack-bot-commands/quickstart.md)

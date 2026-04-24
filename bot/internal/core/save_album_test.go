@@ -13,13 +13,43 @@ import (
 type fakeSearch struct {
 	cands []AlbumCandidate
 	err   error
+
+	lookupCands []AlbumCandidate
+	lookupErr   error
+	resolveID   string
+	resolveErr  error
+
+	searchCalls int
+	lastQuery   string
 }
 
 func (f *fakeSearch) Search(ctx context.Context, query string) ([]AlbumCandidate, error) {
+	f.searchCalls++
+	f.lastQuery = query
 	if f.err != nil {
 		return nil, f.err
 	}
 	return f.cands, nil
+}
+
+func (f *fakeSearch) LookupSpotifyAlbumByID(ctx context.Context, albumID string) ([]AlbumCandidate, error) {
+	if f.lookupErr != nil {
+		return nil, f.lookupErr
+	}
+	if len(f.lookupCands) > 0 {
+		return f.lookupCands, nil
+	}
+	return nil, ErrNoMatch
+}
+
+func (f *fakeSearch) ResolveSpotifyShareURL(ctx context.Context, shareURL string) (string, error) {
+	if f.resolveErr != nil {
+		return "", f.resolveErr
+	}
+	if f.resolveID != "" {
+		return f.resolveID, nil
+	}
+	return "", ErrNoMatch
 }
 
 type memStore struct {
@@ -309,5 +339,186 @@ func TestFormatAlbumLine(t *testing.T) {
 	got := formatAlbumLine(AlbumCandidate{Title: "OK Computer", PrimaryArtist: "Radiohead", Year: &y})
 	if got != "OK Computer | Radiohead (2000)" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+func TestProcessAlbumQuery_SpotifyAlbumURL_NoSearch(t *testing.T) {
+	t.Parallel()
+	y := 1971
+	st := &memStore{}
+	fs := &fakeSearch{
+		lookupCands: []AlbumCandidate{{
+			Title: "Abbey Road", PrimaryArtist: "The Beatles", Year: &y,
+			Provider: "spotify", ProviderRef: "1nxWhrFfLczBxMIO80pqNr",
+		}},
+	}
+	svc := &SaveService{Store: st, Search: fs}
+	q := "https://open.spotify.com/album/1nxWhrFfLczBxMIO80pqNr"
+	um, err := svc.ProcessAlbumQuery(context.Background(), "telegram", "1", "a", "", q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if um.Outcome != OutcomeSaved {
+		t.Fatalf("outcome %v text %q", um.Outcome, um.Text)
+	}
+	if fs.searchCalls != 0 {
+		t.Fatalf("Search called %d times", fs.searchCalls)
+	}
+	if st.insertCalls != 1 {
+		t.Fatalf("inserts %d", st.insertCalls)
+	}
+}
+
+func TestProcessAlbumQuery_EmbeddedSpotifyAlbumURL_NoSearch(t *testing.T) {
+	t.Parallel()
+	y := 2012
+	st := &memStore{}
+	fs := &fakeSearch{
+		lookupCands: []AlbumCandidate{{
+			Title: "Red", PrimaryArtist: "Taylor Swift", Year: &y,
+			Provider: "spotify", ProviderRef: "abc123defgh",
+		}},
+	}
+	svc := &SaveService{Store: st, Search: fs}
+	q := "check this https://open.spotify.com/album/abc123defgh ok?"
+	um, err := svc.ProcessAlbumQuery(context.Background(), "telegram", "1", "a", "", q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if um.Outcome != OutcomeSaved {
+		t.Fatalf("outcome %v", um.Outcome)
+	}
+	if fs.searchCalls != 0 {
+		t.Fatalf("expected direct path, Search calls=%d", fs.searchCalls)
+	}
+}
+
+func TestProcessAlbumQuery_GenericURL_UsesFullStringSearch(t *testing.T) {
+	t.Parallel()
+	st := &memStore{}
+	fs := &fakeSearch{cands: []AlbumCandidate{}}
+	svc := &SaveService{Store: st, Search: fs}
+	q := "https://example.com/foo bar"
+	um, err := svc.ProcessAlbumQuery(context.Background(), "telegram", "1", "a", "", q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if um.Outcome != OutcomeNoMatch {
+		t.Fatalf("outcome %v", um.Outcome)
+	}
+	if fs.searchCalls != 1 || fs.lastQuery != q {
+		t.Fatalf("Search(full) want 1 call with full query, got calls=%d last=%q", fs.searchCalls, fs.lastQuery)
+	}
+}
+
+func TestProcessAlbumQuery_TrackURL_BadLinkNoSearch(t *testing.T) {
+	t.Parallel()
+	fs := &fakeSearch{}
+	svc := &SaveService{Store: &memStore{}, Search: fs}
+	q := "https://open.spotify.com/track/1nxWhrFfLczBxMIO80pqNr"
+	um, err := svc.ProcessAlbumQuery(context.Background(), "telegram", "1", "a", "", q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if um.Outcome != OutcomeBadSpotifyLink {
+		t.Fatalf("outcome %v", um.Outcome)
+	}
+	if fs.searchCalls != 0 {
+		t.Fatal("Search should not run for ineligible Spotify page")
+	}
+}
+
+func TestProcessAlbumQuery_MultiSpotifyAlbumLinks(t *testing.T) {
+	t.Parallel()
+	fs := &fakeSearch{}
+	svc := &SaveService{Store: &memStore{}, Search: fs}
+	q := "https://open.spotify.com/album/1nxWhrFfLczBxMIO80pqNr https://open.spotify.com/album/2nxWhrFfLczBxMIO80pqNr"
+	um, err := svc.ProcessAlbumQuery(context.Background(), "telegram", "1", "a", "", q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if um.Outcome != OutcomeMultiSpotifyLink {
+		t.Fatalf("outcome %v", um.Outcome)
+	}
+	if fs.searchCalls != 0 {
+		t.Fatal("Search should not run")
+	}
+}
+
+func TestProcessAlbumQuery_ShortShare_ResolveAndLookupE2E(t *testing.T) {
+	t.Parallel()
+	y := 2000
+	st := &memStore{}
+	fs := &fakeSearch{
+		resolveID: "resolvedid12",
+		lookupCands: []AlbumCandidate{{
+			Title: "OK Computer", PrimaryArtist: "Radiohead", Year: &y,
+			Provider: "spotify", ProviderRef: "resolvedid12",
+		}},
+	}
+	svc := &SaveService{Store: st, Search: fs}
+	q := "https://spoti.fi/abc123"
+	um, err := svc.ProcessAlbumQuery(context.Background(), "telegram", "1", "a", "", q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if um.Outcome != OutcomeSaved {
+		t.Fatalf("outcome %v", um.Outcome)
+	}
+	if fs.searchCalls != 0 {
+		t.Fatalf("unexpected Search")
+	}
+	if st.insertCalls != 1 {
+		t.Fatalf("inserts %d", st.insertCalls)
+	}
+}
+
+func TestProcessAlbumQuery_ShortShare_ResolveFails_NoSearch(t *testing.T) {
+	t.Parallel()
+	fs := &fakeSearch{resolveErr: errors.New("redirect failed")}
+	svc := &SaveService{Store: &memStore{}, Search: fs}
+	um, err := svc.ProcessAlbumQuery(context.Background(), "telegram", "1", "a", "", "https://spoti.fi/x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if um.Outcome != OutcomeBadSpotifyLink {
+		t.Fatalf("outcome %v", um.Outcome)
+	}
+	if fs.searchCalls != 0 {
+		t.Fatal("no Search fallback on failed FR-008 path")
+	}
+}
+
+func TestProcessAlbumQuery_LookupNoMatch_NoSearchFallback(t *testing.T) {
+	t.Parallel()
+	fs := &fakeSearch{lookupErr: ErrNoMatch}
+	svc := &SaveService{Store: &memStore{}, Search: fs}
+	q := "https://open.spotify.com/album/1nxWhrFfLczBxMIO80pqNr"
+	um, err := svc.ProcessAlbumQuery(context.Background(), "telegram", "1", "a", "", q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if um.Outcome != OutcomeNoMatch {
+		t.Fatalf("outcome %v", um.Outcome)
+	}
+	if fs.searchCalls != 0 {
+		t.Fatal("no Search fallback")
+	}
+}
+
+func TestProcessAlbumQuery_SpotifyPath_ProviderExhausted(t *testing.T) {
+	t.Parallel()
+	fs := &fakeSearch{lookupErr: ErrAllProvidersExhausted}
+	svc := &SaveService{Store: &memStore{}, Search: fs}
+	q := "https://open.spotify.com/album/1nxWhrFfLczBxMIO80pqNr"
+	um, err := svc.ProcessAlbumQuery(context.Background(), "telegram", "1", "a", "", q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if um.Outcome != OutcomeProviderExhausted {
+		t.Fatalf("outcome %v", um.Outcome)
+	}
+	if fs.searchCalls != 0 {
+		t.Fatal("no Search fallback")
 	}
 }
