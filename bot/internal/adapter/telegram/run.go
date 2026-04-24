@@ -15,10 +15,10 @@ import (
 
 const platformSource = "telegram"
 
-// Run starts long-polling. Private 1:1 text and callback queries for album disambig.
-func Run(ctx context.Context, log *slog.Logger, token string, save *core.SaveService) error {
+// NewBot builds a *bot.Bot with save-album handlers. The same instance can be used for daily sends (T019).
+func NewBot(log *slog.Logger, token string, save *core.SaveService) (*bot.Bot, error) {
 	if save == nil {
-		return fmt.Errorf("nil save service")
+		return nil, fmt.Errorf("nil save service")
 	}
 	opts := []bot.Option{
 		bot.WithDefaultHandler(func(tctx context.Context, b *bot.Bot, u *models.Update) {
@@ -34,13 +34,26 @@ func Run(ctx context.Context, log *slog.Logger, token string, save *core.SaveSer
 			}
 		}),
 	}
-	tb, err := bot.New(token, opts...)
-	if err != nil {
-		return fmt.Errorf("telegram bot init: %w", err)
+	return bot.New(token, opts...)
+}
+
+// Start begins long-polling until ctx is cancelled.
+func Start(ctx context.Context, log *slog.Logger, tb *bot.Bot) error {
+	if tb == nil {
+		return fmt.Errorf("nil bot")
 	}
 	log.Info("telegram adapter running (long polling)")
 	tb.Start(ctx)
 	return nil
+}
+
+// Run starts long-polling. Private 1:1 text and callback queries for album disambig.
+func Run(ctx context.Context, log *slog.Logger, token string, save *core.SaveService) error {
+	tb, err := NewBot(log, token, save)
+	if err != nil {
+		return err
+	}
+	return Start(ctx, log, tb)
 }
 
 func handleCallback(ctx context.Context, log *slog.Logger, b *bot.Bot, q *models.CallbackQuery, save *core.SaveService) {
@@ -125,9 +138,6 @@ func handleMessage(ctx context.Context, log *slog.Logger, b *bot.Bot, msg *model
 		_, _ = b.SendMessage(ctx, params)
 		return
 	}
-	chatID := msg.Chat.ID
-	text := msg.Text
-	ext, disp, u := userIdentity(msg.From)
 
 	if n, ok := core.OneBasedPickFromText(text); ok {
 		um, err := save.ProcessPickByIndex(ctx, platformSource, ext, disp, u, n)

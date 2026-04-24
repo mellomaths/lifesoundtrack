@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"time"
 )
 
 // Config holds process and adapter settings loaded from the environment.
@@ -23,6 +24,11 @@ type Config struct {
 	MetadataEnableLastfm      bool
 	MetadataEnableMusicBrainz bool
 	AutoMigrate               bool
+	// Daily recommendations (004): unset LST_DAILY_RECOMMENDATIONS_ENABLE → enabled (opt-out).
+	DailyRecommendationsEnable   bool
+	DailyRecommendationsTZName     string
+	DailyRecommendationsLocation *time.Location
+	DailyRecommendationsCron       string
 }
 
 // FromEnv returns config for the bot. DATABASE_URL and TELEGRAM_BOT_TOKEN are required
@@ -45,20 +51,28 @@ func FromEnv() (Config, error) {
 	}
 	autoM := strings.EqualFold(strings.TrimSpace(os.Getenv("AUTO_MIGRATE")), "true") ||
 		strings.TrimSpace(os.Getenv("AUTO_MIGRATE")) == "1"
+	dailyEn, dailyTZ, dailyLoc, dailyCron, derr := loadDailyRecommendationsSchedule()
+	if derr != nil {
+		return Config{}, derr
+	}
 	return Config{
-		TelegramBotToken:     tok,
-		LogLevel:             lvl,
-		DatabaseURL:          databaseURL,
-		MigrationsPath:       migrationsPath,
-		LastfmAPIKey:         lastfm,
-		MusicBrainzUserAgent: ua,
-		SpotifyClientID:      strings.TrimSpace(os.Getenv("SPOTIFY_CLIENT_ID")),
-		SpotifyClientSecret:  strings.TrimSpace(os.Getenv("SPOTIFY_CLIENT_SECRET")),
+		TelegramBotToken:          tok,
+		LogLevel:                  lvl,
+		DatabaseURL:               databaseURL,
+		MigrationsPath:            migrationsPath,
+		LastfmAPIKey:              lastfm,
+		MusicBrainzUserAgent:      ua,
+		SpotifyClientID:           strings.TrimSpace(os.Getenv("SPOTIFY_CLIENT_ID")),
+		SpotifyClientSecret:       strings.TrimSpace(os.Getenv("SPOTIFY_CLIENT_SECRET")),
 		MetadataEnableSpotify:     parseMetadataFeatureFlag("LST_METADATA_ENABLE_SPOTIFY"),
 		MetadataEnableITunes:      parseMetadataFeatureFlag("LST_METADATA_ENABLE_ITUNES"),
 		MetadataEnableLastfm:      parseMetadataFeatureFlag("LST_METADATA_ENABLE_LASTFM"),
 		MetadataEnableMusicBrainz: parseMetadataFeatureFlag("LST_METADATA_ENABLE_MUSICBRAINZ"),
 		AutoMigrate:               autoM,
+		DailyRecommendationsEnable:   dailyEn,
+		DailyRecommendationsTZName:   dailyTZ,
+		DailyRecommendationsLocation: dailyLoc,
+		DailyRecommendationsCron:     dailyCron,
 	}, nil
 }
 

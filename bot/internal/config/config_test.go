@@ -175,3 +175,92 @@ func TestLoadLocalDotEnv_CommentAndCRLF(t *testing.T) {
 		t.Fatalf("token: %q", cfg.TelegramBotToken)
 	}
 }
+
+func TestFromEnv_DailyRecommendations_DisabledSkipsInvalidTZ(t *testing.T) {
+	t.Setenv("TELEGRAM_BOT_TOKEN", "tok")
+	t.Setenv("DATABASE_URL", "postgres://l:p@h:1/db?sslmode=disable")
+	t.Setenv("LST_DAILY_RECOMMENDATIONS_ENABLE", "false")
+	t.Setenv("LST_DAILY_RECOMMENDATIONS_TZ", "Not/AZone")
+	t.Cleanup(func() {
+		_ = os.Unsetenv("TELEGRAM_BOT_TOKEN")
+		_ = os.Unsetenv("DATABASE_URL")
+		_ = os.Unsetenv("LST_DAILY_RECOMMENDATIONS_ENABLE")
+		_ = os.Unsetenv("LST_DAILY_RECOMMENDATIONS_TZ")
+	})
+	cfg, err := config.FromEnv()
+	if err != nil {
+		t.Fatalf("from env: %v", err)
+	}
+	if cfg.DailyRecommendationsEnable {
+		t.Fatal("expected daily recommendations disabled")
+	}
+}
+
+func TestFromEnv_DailyRecommendations_InvalidTZWhenEnabled(t *testing.T) {
+	t.Setenv("TELEGRAM_BOT_TOKEN", "tok")
+	t.Setenv("DATABASE_URL", "postgres://l:p@h:1/db?sslmode=disable")
+	t.Setenv("LST_DAILY_RECOMMENDATIONS_ENABLE", "true")
+	t.Setenv("LST_DAILY_RECOMMENDATIONS_TZ", "Not/AZone")
+	t.Cleanup(func() {
+		_ = os.Unsetenv("TELEGRAM_BOT_TOKEN")
+		_ = os.Unsetenv("DATABASE_URL")
+		_ = os.Unsetenv("LST_DAILY_RECOMMENDATIONS_ENABLE")
+		_ = os.Unsetenv("LST_DAILY_RECOMMENDATIONS_TZ")
+	})
+	_, err := config.FromEnv()
+	if err == nil {
+		t.Fatal("expected error for invalid TZ")
+	}
+	if !strings.Contains(err.Error(), "LST_DAILY_RECOMMENDATIONS_TZ") {
+		t.Fatalf("error: %v", err)
+	}
+}
+
+func TestFromEnv_DailyRecommendations_InvalidCronWhenEnabled(t *testing.T) {
+	t.Setenv("TELEGRAM_BOT_TOKEN", "tok")
+	t.Setenv("DATABASE_URL", "postgres://l:p@h:1/db?sslmode=disable")
+	t.Setenv("LST_DAILY_RECOMMENDATIONS_ENABLE", "true")
+	t.Setenv("LST_DAILY_RECOMMENDATIONS_TZ", "UTC")
+	t.Setenv("LST_DAILY_RECOMMENDATIONS_CRON", "not-a-valid-cron")
+	t.Cleanup(func() {
+		_ = os.Unsetenv("TELEGRAM_BOT_TOKEN")
+		_ = os.Unsetenv("DATABASE_URL")
+		_ = os.Unsetenv("LST_DAILY_RECOMMENDATIONS_ENABLE")
+		_ = os.Unsetenv("LST_DAILY_RECOMMENDATIONS_TZ")
+		_ = os.Unsetenv("LST_DAILY_RECOMMENDATIONS_CRON")
+	})
+	_, err := config.FromEnv()
+	if err == nil {
+		t.Fatal("expected error for invalid cron")
+	}
+	if !strings.Contains(err.Error(), "LST_DAILY_RECOMMENDATIONS_CRON") {
+		t.Fatalf("error: %v", err)
+	}
+}
+
+func TestFromEnv_DailyRecommendations_DefaultsWhenEnabled(t *testing.T) {
+	t.Setenv("TELEGRAM_BOT_TOKEN", "tok")
+	t.Setenv("DATABASE_URL", "postgres://l:p@h:1/db?sslmode=disable")
+	t.Setenv("LST_DAILY_RECOMMENDATIONS_ENABLE", "true")
+	t.Cleanup(func() {
+		_ = os.Unsetenv("TELEGRAM_BOT_TOKEN")
+		_ = os.Unsetenv("DATABASE_URL")
+		_ = os.Unsetenv("LST_DAILY_RECOMMENDATIONS_ENABLE")
+	})
+	cfg, err := config.FromEnv()
+	if err != nil {
+		t.Fatalf("from env: %v", err)
+	}
+	if !cfg.DailyRecommendationsEnable {
+		t.Fatal("expected enabled")
+	}
+	if cfg.DailyRecommendationsTZName != "UTC" {
+		t.Fatalf("tz: %q", cfg.DailyRecommendationsTZName)
+	}
+	if cfg.DailyRecommendationsCron != "0 6 * * *" {
+		t.Fatalf("cron: %q", cfg.DailyRecommendationsCron)
+	}
+	if cfg.DailyRecommendationsLocation == nil {
+		t.Fatal("expected location")
+	}
+}
