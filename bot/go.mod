@@ -4,9 +4,11 @@ go 1.25.0
 
 require (
 	github.com/go-telegram/bot v1.20.0
+	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/joho/godotenv v1.5.1
 	github.com/pressly/goose/v3 v3.27.0
+	github.com/robfig/cron/v3 v3.0.1
 	github.com/sony/gobreaker v1.0.0
 )
 

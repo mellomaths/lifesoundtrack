@@ -4,10 +4,15 @@ alwaysApply: true
 
 <!-- SPECKIT START -->
 For additional context about technologies, project structure, and shell commands,
-read the **active** implementation plan (`.specify/feature.json` points to the current feature; example:
-[`specs/003-save-album-command/plan.md`](../../specs/003-save-album-command/plan.md) for save-album + **metadata** **chain** **Spotify→iTunes→Last.fm→MusicBrainz** with **`LST_METADATA_ENABLE_*`** **flags** + Postgres + disambiguation **(≤2 distinct `Title | Artist (Year)` lines + Other; dedupe same-label rows before prompt)** per spec),
-and the feature **001** sandbox runbook at
+read the **active** feature from [`.specify/feature.json`](../../.specify/feature.json) (currently
+[`specs/004-daily-album-recommendations/spec.md`](../../specs/004-daily-album-recommendations/spec.md) and
+[`specs/004-daily-album-recommendations/plan.md`](../../specs/004-daily-album-recommendations/plan.md): daily fair picks from **`saved_albums`**, Telegram delivery, transactional **`last_recommended_at`** + **`recommendations`**, in-process **`robfig/cron`** + **`LST_DAILY_RECOMMENDATIONS_*`** env flags per [contracts/feature-flags.md](../../specs/004-daily-album-recommendations/contracts/feature-flags.md); **listener discovery** SQL must satisfy PostgreSQL (**FR-013**–**FR-015**, [research.md](../../specs/004-daily-album-recommendations/research.md) §8)); **in-process** daily scheduler in `bot/cmd/bot` must run alongside Telegram (**FR-017**–**FR-018**)).
+
+Also see [`specs/003-save-album-command/plan.md`](../../specs/003-save-album-command/plan.md) for save-album + **metadata** **chain** **Spotify→iTunes→Last.fm→MusicBrainz** with **`LST_METADATA_ENABLE_*`** + Postgres + disambiguation **(≤2 distinct `Title | Artist (Year)` lines + Other; dedupe same-label rows before prompt)**.
+
+The feature **001** sandbox runbook is at
 [`specs/001-lifesoundtrack-bot-commands/quickstart.md`](../../specs/001-lifesoundtrack-bot-commands/quickstart.md)
 for core Telegram / domain behavior.
+
 The Go module for the bot is under `bot/`: keep **product behavior** in `bot/internal/core` and **platform-specific** code under `bot/internal/adapter/...` (e.g. Telegram first).
 <!-- SPECKIT END -->
