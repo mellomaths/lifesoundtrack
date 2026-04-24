@@ -125,6 +125,9 @@ func handleMessage(ctx context.Context, log *slog.Logger, b *bot.Bot, msg *model
 		_, _ = b.SendMessage(ctx, params)
 		return
 	}
+	chatID := msg.Chat.ID
+	text := msg.Text
+	ext, disp, u := userIdentity(msg.From)
 
 	if n, ok := core.OneBasedPickFromText(text); ok {
 		um, err := save.ProcessPickByIndex(ctx, platformSource, ext, disp, u, n)
