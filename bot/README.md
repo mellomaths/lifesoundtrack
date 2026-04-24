@@ -6,7 +6,8 @@
 - **`internal/metadata`**: **Spotify → iTunes → Last.fm → MusicBrainz** (see `LST_METADATA_ENABLE_*` in [`.env.example`](./.env.example)) behind `MetadataOrchestrator`.
 - **`cmd/bot`**: process entry, config, logging, wires the active adapter and database.
 
-Feature **003** (save album): [specs/003-save-album-command/quickstart.md](../specs/003-save-album-command/quickstart.md).
+Feature **003** (save album): [specs/003-save-album-command/quickstart.md](../specs/003-save-album-command/quickstart.md).  
+Feature **005** (paste Spotify album or share link): [specs/005-save-album-spotify-url/quickstart.md](../specs/005-save-album-spotify-url/quickstart.md).
 
 ## Develop
 

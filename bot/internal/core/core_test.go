@@ -47,6 +47,13 @@ func TestReply(t *testing.T) {
 	if !strings.Contains(help, "/start") || !strings.Contains(help, "/help") || !strings.Contains(help, "/ping") || !strings.Contains(help, "/album") {
 		t.Errorf("help must list supported commands, got: %q", help)
 	}
+	if !strings.Contains(strings.ToLower(help), "spotify") {
+		t.Errorf("help should mention Spotify album/share links, got: %q", help)
+	}
+	start := Reply(CommandStart)
+	if !strings.Contains(strings.ToLower(start), "spotify") {
+		t.Errorf("start should mention Spotify link paste, got: %q", start)
+	}
 	if s := Reply(CommandPing); strings.TrimSpace(s) == "" {
 		t.Error("ping reply must be non-empty")
 	}

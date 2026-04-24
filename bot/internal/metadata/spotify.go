@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,6 +19,7 @@ import (
 const (
 	spotifyTokenURL  = "https://accounts.spotify.com/api/token"
 	spotifySearchURL = "https://api.spotify.com/v1/search"
+	spotifyAlbumURL  = "https://api.spotify.com/v1/albums/"
 )
 
 func (c *Chain) runSpotifySearch(ctx context.Context, q string) ([]core.AlbumCandidate, error) {
@@ -136,12 +138,12 @@ func (c *Chain) spotifyAccessToken(ctx context.Context) (string, error) {
 type spotifySearchJSON struct {
 	Albums struct {
 		Items []struct {
-			ID          string   `json:"id"`
-			Name        string   `json:"name"`
+			ID          string                  `json:"id"`
+			Name        string                  `json:"name"`
 			Artists     []struct{ Name string } `json:"artists"`
-			ReleaseDate string   `json:"release_date"`
-			Genres      []string `json:"genres"`
-			Images      []struct{ URL string } `json:"images"`
+			ReleaseDate string                  `json:"release_date"`
+			Genres      []string                `json:"genres"`
+			Images      []struct{ URL string }  `json:"images"`
 		} `json:"items"`
 	} `json:"albums"`
 }
@@ -204,3 +206,136 @@ func yearFromDate(s string) int {
 }
 
 func intPtr(n int) *int { return &n }
+
+// spotifyAlbumDetailJSON is a minimal subset of GET /v1/albums/{id}.
+type spotifyAlbumDetailJSON struct {
+	ID          string                  `json:"id"`
+	Name        string                  `json:"name"`
+	Artists     []struct{ Name string } `json:"artists"`
+	ReleaseDate string                  `json:"release_date"`
+	Genres      []string                `json:"genres"`
+	Images      []struct{ URL string }  `json:"images"`
+}
+
+func parseSpotifyAlbumDetailJSON(body []byte) ([]core.AlbumCandidate, error) {
+	var raw spotifyAlbumDetailJSON
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(raw.ID) == "" || strings.TrimSpace(raw.Name) == "" {
+		return nil, nil
+	}
+	var primary string
+	if len(raw.Artists) > 0 {
+		primary = raw.Artists[0].Name
+	}
+	year := yearFromDate(raw.ReleaseDate)
+	var y *int
+	if year != 0 {
+		y = intPtr(year)
+	}
+	art := ""
+	if len(raw.Images) > 0 {
+		art = raw.Images[0].URL
+	}
+	return []core.AlbumCandidate{{
+		Title:         raw.Name,
+		PrimaryArtist: primary,
+		Year:          y,
+		Genres:        core.CapGenres(append([]string{}, raw.Genres...)),
+		Relevance:     1,
+		Provider:      "spotify",
+		ProviderRef:   raw.ID,
+		ArtURL:        art,
+	}}, nil
+}
+
+// LookupSpotifyAlbumByID implements [core.MetadataOrchestrator] for the direct-link path.
+func (c *Chain) LookupSpotifyAlbumByID(ctx context.Context, albumID string) ([]core.AlbumCandidate, error) {
+	if c == nil {
+		return nil, fmt.Errorf("nil chain")
+	}
+	albumID = strings.TrimSpace(albumID)
+	if albumID == "" {
+		return nil, core.ErrNoMatch
+	}
+	if !c.enableSpotify || c.spotifyClientID == "" || c.spotifyClientSecret == "" {
+		return nil, core.ErrAllProvidersExhausted
+	}
+	result, err := c.spBrk.Execute(func() (any, error) {
+		tok, err := c.spotifyAccessToken(ctx)
+		if err != nil {
+			return nil, err
+		}
+		u := spotifyAlbumURL + url.PathEscape(albumID)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Authorization", "Bearer "+tok)
+		req.Header.Set("Accept", "application/json")
+		resp, err := c.http.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = resp.Body.Close() }()
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		if err != nil {
+			return nil, err
+		}
+		if resp.StatusCode == http.StatusNotFound {
+			if c.log != nil {
+				c.log.Info("spotify album by id", "spotify_op", "get_album", "outcome", "not_found")
+			}
+			return nil, core.ErrNoMatch
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			if c.log != nil {
+				c.log.Warn("spotify album by id", "spotify_op", "get_album", "outcome", "http_error", "status", resp.StatusCode)
+			}
+			return nil, fmt.Errorf("spotify album http %d", resp.StatusCode)
+		}
+		cands, err := parseSpotifyAlbumDetailJSON(body)
+		if err != nil {
+			return nil, err
+		}
+		if len(cands) == 0 {
+			return nil, core.ErrNoMatch
+		}
+		return cands, nil
+	})
+	if err != nil {
+		if c.log != nil && !errors.Is(err, core.ErrNoMatch) {
+			c.log.Warn("spotify album by id", "spotify_op", "get_album", "outcome", "error", "err", err)
+		}
+		return nil, err
+	}
+	if c.log != nil {
+		c.log.Info("spotify album by id", "spotify_op", "get_album", "outcome", "ok")
+	}
+	return result.([]core.AlbumCandidate), nil
+}
+
+// ResolveSpotifyShareURL implements [core.MetadataOrchestrator] for supported HTTPS share links.
+func (c *Chain) ResolveSpotifyShareURL(ctx context.Context, shareURL string) (string, error) {
+	if c == nil {
+		return "", fmt.Errorf("nil chain")
+	}
+	if !c.enableSpotify {
+		return "", core.ErrAllProvidersExhausted
+	}
+	if c.spotifyClientID == "" || c.spotifyClientSecret == "" {
+		return "", core.ErrAllProvidersExhausted
+	}
+	id, err := resolveSpotifyShareToAlbumID(ctx, shareURL)
+	if err != nil {
+		if c.log != nil {
+			c.log.Info("spotify share resolve", "spotify_op", "share_redirect", "outcome", "fail")
+		}
+		return "", err
+	}
+	if c.log != nil {
+		c.log.Info("spotify share resolve", "spotify_op", "share_redirect", "outcome", "ok")
+	}
+	return id, nil
+}

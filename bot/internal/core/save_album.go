@@ -40,6 +40,8 @@ const (
 	OutcomeSaved
 	OutcomePickOutOfRange
 	OutcomeNoSession
+	OutcomeBadSpotifyLink
+	OutcomeMultiSpotifyLink
 )
 
 // UserMessage is non-technical user-visible text (FR-007).
@@ -59,6 +61,68 @@ type SaveService struct {
 	Log    *slog.Logger
 }
 
+// trySpotifyDirectAlbumPath handles FR-008 Spotify album / share URLs before free-text Search.
+func (s *SaveService) trySpotifyDirectAlbumPath(ctx context.Context, listenerID, q string) (UserMessage, bool, error) {
+	plan := PlanSpotifyAlbumQuery(q)
+	switch plan.Mode {
+	case SpotifyModeNone:
+		return UserMessage{}, false, nil
+	case SpotifyModeAmbiguousMulti:
+		if s.Log != nil {
+			s.Log.Info("album query classified", "spotify_path", "multi_link")
+		}
+		return UserMessage{Outcome: OutcomeMultiSpotifyLink, Text: multiSpotifyLinkCopy()}, true, nil
+	case SpotifyModeIneligibleSpotifyHost:
+		if s.Log != nil {
+			s.Log.Info("album query classified", "spotify_path", "ineligible_spotify_page")
+		}
+		return UserMessage{Outcome: OutcomeBadSpotifyLink, Text: badSpotifyLinkCopy()}, true, nil
+	case SpotifyModeDirect:
+		return s.finishSpotifyAlbumByID(ctx, listenerID, q, plan.AlbumID)
+	case SpotifyModeResolveShort:
+		id, err := s.Search.ResolveSpotifyShareURL(ctx, plan.ShareURL)
+		if err != nil {
+			if s.Log != nil {
+				s.Log.Warn("spotify share resolve failed", "spotify_path", "resolve", "err", err)
+			}
+			if errors.Is(err, ErrAllProvidersExhausted) {
+				return UserMessage{Outcome: OutcomeProviderExhausted, Text: tryAgainCopy()}, true, nil
+			}
+			return UserMessage{Outcome: OutcomeBadSpotifyLink, Text: badSpotifyLinkCopy()}, true, nil
+		}
+		return s.finishSpotifyAlbumByID(ctx, listenerID, q, id)
+	default:
+		return UserMessage{}, false, nil
+	}
+}
+
+func (s *SaveService) finishSpotifyAlbumByID(ctx context.Context, listenerID, userQuery, albumID string) (UserMessage, bool, error) {
+	cands, err := s.Search.LookupSpotifyAlbumByID(ctx, albumID)
+	if err != nil {
+		if errors.Is(err, ErrAllProvidersExhausted) {
+			return UserMessage{Outcome: OutcomeProviderExhausted, Text: tryAgainCopy()}, true, nil
+		}
+		if errors.Is(err, ErrNoMatch) {
+			return UserMessage{Outcome: OutcomeNoMatch, Text: noMatchCopy()}, true, nil
+		}
+		if s.Log != nil {
+			s.Log.Warn("spotify album by id failed", "spotify_path", "lookup", "err", err)
+		}
+		return UserMessage{Outcome: OutcomeTransientError, Text: tryAgainCopy()}, true, nil
+	}
+	if len(cands) != 1 {
+		return UserMessage{Outcome: OutcomeNoMatch, Text: noMatchCopy()}, true, nil
+	}
+	if s.Log != nil {
+		s.Log.Info("spotify direct album resolved", "spotify_path", "album_id_lookup", "outcome", "ok")
+	}
+	_, ums, err := s.persistSave(ctx, listenerID, &cands[0], userQuery, cands[0].Provider, cands[0].ProviderRef, cands[0].Title, cands[0].PrimaryArtist, cands[0].Year, cands[0].Genres, cands[0].ArtURL, nil)
+	if err != nil {
+		return UserMessage{}, true, err
+	}
+	return ums, true, nil
+}
+
 // ProcessAlbumQuery handles a non-pick /album line (US1, US1b, US2).
 func (s *SaveService) ProcessAlbumQuery(ctx context.Context, source, externalID, displayName, username, userQuery string) (UserMessage, error) {
 	q := userQuery
@@ -72,6 +136,13 @@ func (s *SaveService) ProcessAlbumQuery(ctx context.Context, source, externalID,
 	if err != nil {
 		return UserMessage{}, err
 	}
+
+	if um, ok, err := s.trySpotifyDirectAlbumPath(ctx, listener.ID, q); ok {
+		return um, err
+	} else if err != nil {
+		return UserMessage{}, err
+	}
+
 	cands, err := s.Search.Search(ctx, q)
 	if err != nil {
 		if errors.Is(err, ErrNoMatch) {
@@ -173,16 +244,16 @@ func (s *SaveService) persistSave(
 		return "", UserMessage{}, err
 	}
 	savedID, err := s.Store.InsertSavedAlbum(ctx, store.InsertSavedAlbumParams{
-		ListenerID:        listenerID,
-		UserQueryText:     strOrNil(userQuery),
-		Title:             title,
-		PrimaryArtist:     strOrNil(artist),
-		Year:              year,
-		Genres:            CapGenres(genres),
-		ProviderName:      prov,
-		ProviderAlbumID:   strOrNil(provRef),
-		ArtURL:            strOrNil(art),
-		Extra:             extra,
+		ListenerID:      listenerID,
+		UserQueryText:   strOrNil(userQuery),
+		Title:           title,
+		PrimaryArtist:   strOrNil(artist),
+		Year:            year,
+		Genres:          CapGenres(genres),
+		ProviderName:    prov,
+		ProviderAlbumID: strOrNil(provRef),
+		ArtURL:          strOrNil(art),
+		Extra:           extra,
 	})
 	if err != nil {
 		return "", UserMessage{}, err
@@ -270,10 +341,6 @@ func formatCandidateLines(cands []AlbumCandidate, numbered bool) string {
 		}
 	}
 	return b
-}
-
-func emptyAlbumQueryCopy() string {
-	return "Add what to look for: /album <search text> (e.g. album title or artist)."
 }
 
 func tooLongQueryCopy() string {
