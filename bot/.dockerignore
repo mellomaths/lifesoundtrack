@@ -1,6 +1,5 @@
 .git
 .env
-.env.*
 *.log
 dist/
 node_modules/
