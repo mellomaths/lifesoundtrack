@@ -12,7 +12,13 @@ import (
 )
 
 func (c *Chain) runLastfmSearch(ctx context.Context, q string) ([]core.AlbumCandidate, error) {
-	if c == nil || c.lastfmKey == "" {
+	if c == nil {
+		return nil, fmt.Errorf("nil chain")
+	}
+	if !c.enableLastfm {
+		return nil, nil
+	}
+	if c.lastfmKey == "" {
 		return nil, nil
 	}
 	result, err := c.lfBrk.Execute(func() (any, error) {
@@ -36,7 +42,7 @@ func (c *Chain) runLastfmSearch(ctx context.Context, q string) ([]core.AlbumCand
 		if err != nil {
 			return nil, err
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		if err != nil {
 			return nil, err

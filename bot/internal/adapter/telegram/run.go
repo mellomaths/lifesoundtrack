@@ -52,13 +52,19 @@ func handleCallback(ctx context.Context, log *slog.Logger, b *bot.Bot, q *models
 		_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{CallbackQueryID: q.ID})
 		return
 	}
-	if !strings.HasPrefix(q.Data, "apick:") {
-		_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{CallbackQueryID: q.ID})
-		return
-	}
-	suffix := strings.TrimPrefix(q.Data, "apick:")
-	n, err := strconv.Atoi(suffix)
-	if err != nil || n < 1 || n > 3 {
+	var n int
+	switch {
+	case q.Data == "aother":
+		n = 3 // "Other" → refine-query path in core
+	case strings.HasPrefix(q.Data, "apick:"):
+		suffix := strings.TrimPrefix(q.Data, "apick:")
+		var err error
+		n, err = strconv.Atoi(suffix)
+		if err != nil || n < 1 || n > 2 {
+			_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{CallbackQueryID: q.ID})
+			return
+		}
+	default:
 		_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{CallbackQueryID: q.ID})
 		return
 	}
@@ -113,12 +119,15 @@ func handleMessage(ctx context.Context, log *slog.Logger, b *bot.Bot, msg *model
 			return
 		}
 		params := &bot.SendMessageParams{ChatID: chatID, Text: um.Text}
-		if um.Outcome == core.OutcomeDisambig && um.PickCount > 0 {
-			params.ReplyMarkup = disambigKeyboard(um.PickCount)
+		if um.Outcome == core.OutcomeDisambig && len(um.AlbumButtonLabels) > 0 {
+			params.ReplyMarkup = disambigKeyboard(um.AlbumButtonLabels)
 		}
 		_, _ = b.SendMessage(ctx, params)
 		return
 	}
+	chatID := msg.Chat.ID
+	text := msg.Text
+	ext, disp, u := userIdentity(msg.From)
 
 	if n, ok := core.OneBasedPickFromText(text); ok {
 		um, err := save.ProcessPickByIndex(ctx, platformSource, ext, disp, u, n)
@@ -137,21 +146,50 @@ func handleMessage(ctx context.Context, log *slog.Logger, b *bot.Bot, msg *model
 	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, Text: reply})
 }
 
-func disambigKeyboard(n int) *models.InlineKeyboardMarkup {
-	if n < 1 {
-		n = 1
+// telegramInlineButtonTextMax is Telegram's max label length for inline buttons.
+const telegramInlineButtonTextMax = 64
+
+func disambigKeyboard(albumLabels []string) *models.InlineKeyboardMarkup {
+	// Core should pass at most 2 distinct labels; skip duplicate strings defensively
+	// so we never show two identical button captions (SC-007).
+	uniq := make([]string, 0, 2)
+	seen := make(map[string]struct{}, len(albumLabels))
+	for _, lab := range albumLabels {
+		if len(uniq) >= 2 {
+			break
+		}
+		if _, ok := seen[lab]; ok {
+			continue
+		}
+		seen[lab] = struct{}{}
+		uniq = append(uniq, lab)
 	}
-	if n > 3 {
-		n = 3
+	rows := make([][]models.InlineKeyboardButton, 0, 3)
+	for i, lab := range uniq {
+		if i >= 2 {
+			break
+		}
+		rows = append(rows, []models.InlineKeyboardButton{{
+			Text:         truncateForButton(lab),
+			CallbackData: "apick:" + strconv.Itoa(i+1),
+		}})
 	}
-	row := make([]models.InlineKeyboardButton, 0, n)
-	for i := 1; i <= n; i++ {
-		row = append(row, models.InlineKeyboardButton{
-			Text:         strconv.Itoa(i),
-			CallbackData: "apick:" + strconv.Itoa(i),
-		})
+	rows = append(rows, []models.InlineKeyboardButton{{
+		Text:         "Other",
+		CallbackData: "aother",
+	}})
+	return &models.InlineKeyboardMarkup{InlineKeyboard: rows}
+}
+
+func truncateForButton(s string) string {
+	if len(s) <= telegramInlineButtonTextMax {
+		return s
 	}
-	return &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{row}}
+	runes := []rune(s)
+	if len(runes) <= telegramInlineButtonTextMax {
+		return s
+	}
+	return string(runes[:telegramInlineButtonTextMax-1]) + "…"
 }
 
 func userIdentity(u *models.User) (externalID, display, username string) {

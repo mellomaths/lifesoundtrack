@@ -23,7 +23,7 @@ func RunMigrations(migrationsDir, databaseURL string) error {
 	if err != nil {
 		return fmt.Errorf("open database for migrations: %w", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	if err := goose.SetDialect("postgres"); err != nil {
 		return fmt.Errorf("goose dialect: %w", err)
 	}

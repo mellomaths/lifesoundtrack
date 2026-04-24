@@ -2,11 +2,12 @@
 
 **Purpose**: Validate specification completeness and quality before proceeding to planning  
 **Created**: 2026-04-23  
+**Last validated**: 2026-04-24 (amendment: **equivalent**-**label** **collapse** / **no** **duplicate** **disambiguation** **lines** — **FR-009**, **SC-007**)  
 **Feature**: [spec.md](../spec.md)
 
 ## Content Quality
 
-- [x] No implementation details (languages, frameworks, APIs) — *Pass: product-level language for FR/SC; stakeholder input in header quotes required behavior; NFR/constitution callouts use operational terms; provider and schema are plan-owned (Assumptions).*
+- [x] No implementation details (languages, frameworks, APIs) — *Pass: this amendment **intentionally** names the **four** **public** **catalogs** and **operator** **environment** **flags** as **product/ops** **requirements** (see **FR-002**); there are **no** **framework** or **code-structure** **mandates** in **User Scenarios** or **SC**; **parsing** of flag **values** is **delegated** to **plan**/**runbook**.*
 - [x] Focused on user value and business needs
 - [x] Written for non-technical stakeholders where possible
 - [x] All mandatory sections completed
@@ -31,9 +32,11 @@
 
 ## Notes
 
-- **Clarify (2026-04-23)**: Multi-match **disambiguation** (up to **3** options, relevance order, buttons or numbered text) is captured in **spec.md** (**User Story 1b**, **FR-009**).
-- **Next step**: Run `/speckit.plan` (or clarify further if you want a named metadata provider in the spec).
-- `/.specify/feature.json` is set to this feature directory for downstream Spec Kit commands.
+- **Clarify (2026-04-23)**: Multi-match **disambiguation** is captured in **spec.md** (**User Story 1b**, **FR-009**): **at most two** album lines **+** **Other**; labels **`ALBUM_TITLE | ARTIST (YEAR)`**; **Other** → query-refinement help, **no** save.
+- **Amendment (2026-04-23)**: Supersedes prior “up to **three**” album options; re-run **plan/contracts/tasks** alignment if implementation already followed the old cap.
+- **Amendment (2026-04-24)**: **Metadata** **order** and **per-catalog** **flags** are in **FR-002** / **Key Entities**; sync **plan.md**, **contracts/metadata-orchestrator.md**, **research.md**, and **quickstart** with **env** **variable** **names** and **merge** / **fallthrough** **semantics**.
+- **Next step**: Re-sync **plan.md** / **contracts** / **tasks.md** with **FR-009** (distinct-by-label collapse) and **SC-007**; then run `/speckit.plan` (or targeted contract updates) if the **orchestrator** or **UI** still **lists** **duplicate** **labels** as **separate** **choices**.
+- `.specify/feature.json` is set to this feature directory for downstream Spec Kit commands.
 
 ---
 

@@ -55,7 +55,17 @@ func main() {
 	}
 	defer st.Close()
 
-	orch := metadata.NewChain(nil, cfg.LastfmAPIKey, cfg.MusicBrainzUserAgent)
+	orch := metadata.NewChain(metadata.ChainConfig{
+		LastfmAPIKey:         cfg.LastfmAPIKey,
+		MusicBrainzUserAgent: cfg.MusicBrainzUserAgent,
+		SpotifyClientID:      cfg.SpotifyClientID,
+		SpotifyClientSecret:  cfg.SpotifyClientSecret,
+		EnableSpotify:        cfg.MetadataEnableSpotify,
+		EnableITunes:         cfg.MetadataEnableITunes,
+		EnableLastfm:         cfg.MetadataEnableLastfm,
+		EnableMusicBrainz:    cfg.MetadataEnableMusicBrainz,
+		Log:                  log,
+	})
 	save := &core.SaveService{Store: st, Search: orch, Log: log}
 
 	if err := telegram.Run(ctx, log, cfg.TelegramBotToken, save); err != nil {

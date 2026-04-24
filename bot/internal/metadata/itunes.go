@@ -17,6 +17,9 @@ func (c *Chain) runITunesSearch(ctx context.Context, q string) ([]core.AlbumCand
 	if c == nil {
 		return nil, fmt.Errorf("nil chain")
 	}
+	if !c.enableITunes {
+		return nil, nil
+	}
 	result, err := c.itBrk.Execute(func() (any, error) {
 		u, err := url.Parse("https://itunes.apple.com/search")
 		if err != nil {
@@ -36,7 +39,7 @@ func (c *Chain) runITunesSearch(ctx context.Context, q string) ([]core.AlbumCand
 		if err != nil {
 			return nil, err
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		if err != nil {
 			return nil, err

@@ -1,6 +1,6 @@
 # Data model: save album + listeners (003)
 
-**Spec**: [spec.md](spec.md) | **Plan**: [plan.md](plan.md) | **Date**: 2026-04-23
+**Spec**: [spec.md](spec.md) | **Plan**: [plan.md](plan.md) | **Date**: 2026-04-24
 
 ## Conventions
 
@@ -45,7 +45,7 @@ One row per **user action** that successfully saves a resolved album (spec allow
 | `primary_artist` | TEXT | YES | Main artist as single string. |
 | `year` | INT | YES | Release year (if known). |
 | `genres` | TEXT[] | YES | Optional genre tags. |
-| `provider_name` | TEXT | NO | `musicbrainz` \| `lastfm` \| `itunes` \| … |
+| `provider_name` | TEXT | NO | `spotify` \| `itunes` \| `lastfm` \| `musicbrainz` (see [plan](plan.md) **metadata** **chain**). |
 | `provider_album_id` | TEXT | YES | Opaque id for re-fetch. |
 | `art_url` | TEXT | YES | Optional cover, HTTPS. |
 | `extra` | JSONB | YES | Truncated provider payload for analytics (no PII, no full raw dump). |
@@ -55,13 +55,13 @@ One row per **user action** that successfully saves a resolved album (spec allow
 
 ## Table: `disambiguation_sessions`
 
-Stores **pending** candidate lists between “search returned 2–3 albums” and “user picked one” (**FR-009**). **Required** for production / **multi-replica**; local **single-process** dev may use in-memory instead, but the same schema is the source of truth when Postgres is enabled. **No Redis** in v1.
+Stores **pending** **candidate** **lists** **only** **when** the **user** **must** **pick** **among** **two** **distinct** **user**-**visible** **labels** (**FR-009**). **Not** **used** for the **all**-**duplicates**-**same**-**label** path (orchestrator **collapses** to **one** **row** and **saves** **without** **this** **record**). **Required** for production / **multi-replica** when a **true** disambig **step** runs; local **single-process** dev may use in-memory instead. **No Redis** in v1.
 
 | Column | Type | Null | Description |
 |--------|------|------|-------------|
 | `id` | UUID | NO | Session id. |
 | `listener_id` | UUID | NO | FK → `listeners`. |
-| `candidates` | JSONB | NO | Up to 3 **normalized** candidates. |
+| `candidates` | JSONB | NO | **Up to 2** **normalized** **distinct**-**by**-**label** **candidates** (relevance order). **Pre**-**store**, **orchestrator** / **core** **must** **dedupe** **same** **formatted** **label** **(see** [plan](plan.md) **key** **note** **1**)**. **Other** is not stored here. |
 | `created_at` | TIMESTAMPTZ | NO | |
 | `expires_at` | TIMESTAMPTZ | NO | Polling / cron deletes expired. |
 
