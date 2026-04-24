@@ -1,13 +1,13 @@
 # Implementation Plan: LifeSoundTrack — save album command, metadata chain, Postgres
 
-**Branch**: `003-save-album-command` | **Date**: 2026-04-23 | **Spec**: [spec.md](spec.md)  
-**Input**: Feature **003** + user planning notes: 2–3 free-tier music APIs, **circuit breaker** fallback, **PostgreSQL**, **migrations** for schema. *(Clarification 2026-04-23: **no Redis**—disambiguation state in Postgres and/or in-memory for single-process dev only.)*
+**Branch**: `003-save-album-command` | **Date**: 2026-04-24 | **Spec**: [spec.md](spec.md)  
+**Input**: Feature **003** + planning notes: **chained** metadata **(Spotify → iTunes → Last.fm → MusicBrainz)** with **per-catalog** **env** **flags** and **circuit** **breaker** **fallthrough**; **PostgreSQL** + **migrations**; **no** **Redis**—disambiguation state in Postgres and/or in-memory for single-process dev only. **2026-04-24**: **equivalent**-**label** **collapse** before disambiguation UI (**FR-009** / **SC-007**).
 
 **Note**: `setup-plan.sh` may require a **git feature branch**; canonical paths are in [`.specify/feature.json`](../../.specify/feature.json) → **`specs/003-save-album-command/`**. `/speckit.tasks` (Phase 2) is **not** created by this command.
 
 ## Summary
 
-Add the **`save_album`** / Telegram **`/album`** flow: free-form user text → **chained** metadata **MusicBrainz → Last.fm → iTunes** (order fixed in v1) with a **per-provider circuit breaker**; **up to 3** candidates; **user pick** (buttons or numbers). Persist **listeners** and **saved_albums** in **PostgreSQL**; store **pending disambiguation** in **`disambiguation_sessions`** (Postgres) for production / multi-replica, or **in-memory** for local single-process dev. Manage schema with **versioned SQL migrations** (e.g. `golang-migrate`). **Docker Compose** adds **Postgres** only (no Redis).
+Add the **`save_album`** / Telegram **`/album`** flow: free-form user text → **fixed-order** **chained** metadata **Spotify** → **iTunes** → **Last.fm** → **MusicBrainz** (per **FR-002**), with **per-catalog** **feature** **flags** and **per-provider** **circuit** **breakers**; **fallthrough** on skip / empty / recoverable failure. **Disambiguation** shows **at** **most** **two** **distinct** **user-visible** **labels** **`ALBUM_TITLE | ARTIST (YEAR)`** **plus** **Other** **only** when **two** **distinct** **labels** **need** a **user** **choice**. **Before** any **disambig** **prompt**, **collapse** **candidates** that **share** the **same** **label** and **keep** the **first** **by** **relevance**; **if** only **one** **distinct** **label** **remains** (including the **all-duplicates** case), **do** **not** **prompt**—**save** (or follow single-match policy) per **FR-009** / spec **amendment** **equivalent** **labels**. Persist **listeners** and **saved_albums** in **PostgreSQL**; store **pending** **disambiguation** in **`disambiguation_sessions`** when a **true** **two**-**choice** (or **Other**) **step** is **required**. **Versioned** **SQL** **migrations** (e.g. `golang-migrate`). **Docker** **Compose** adds **Postgres** only (no Redis).
 
 ## Technical Context
 
@@ -15,16 +15,16 @@ Add the **`save_album`** / Telegram **`/album`** flow: free-form user text → *
 |-------|--------|
 | **Language/Version** | **Go 1.22+** (existing `bot/go.mod`) |
 | **Runtime** | Long-running `bot/cmd/bot`; Telegram long polling (existing adapter). |
-| **Metadata** | **MusicBrainz** (keyless, 1 rps) → **Last.fm** `album.search` (needs `LASTFM_API_KEY`) → **iTunes Search API** (keyless, terms-of-use). See [research.md](research.md). |
-| **Resilience** | **Circuit breaker** per provider (`gobreaker` or similar); on failure, next provider. |
-| **Database** | **PostgreSQL 15+**; driver **`pgx/v5` + `database/sql`** or pure `pgxpool`; no ORM **required** for v1. |
-| **Migrations** | **golang-migrate**; files under **`bot/migrations/`** (or `migrations/` at repo root—pick one, document in [quickstart](quickstart.md)). |
-| **Disambiguation storage** | **`disambiguation_sessions`** table in Postgres (see [data-model](data-model.md)); optional in-memory cache for **single-replica** dev only. **No** Redis. |
-| **Config** | Extend `bot/internal/config` with `DATABASE_URL`, `LASTFM_API_KEY` (optional if chain stops earlier); **no** keys in `Default`. |
-| **Testing** | `go test ./...`; fakes for **orchestrator**; integration tests with **testcontainers** (optional) or `docker compose -f` minimal Postgres. |
+| **Metadata** | **Spotify** Web API (Client Credentials) → **iTunes** Search API → **Last.fm** `album.search` → **MusicBrainz** JSON — **fixed** order; **per** **`LST_METADATA_ENABLE_*`** **flags**; **Spotify** needs `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET` when enabled. See [research.md](research.md). |
+| **Resilience** | **Circuit** **breaker** per provider; on failure or throttle (policy), **try** **next** **enabled** **ring**; **4xx**/client errors per orchestrator policy. |
+| **Database** | **PostgreSQL 15+**; **`pgx/v5` + `database/sql`** or `pgxpool`; no ORM **required** for v1. |
+| **Migrations** | **golang-migrate**; files under **`bot/migrations/`** (see [quickstart](quickstart.md)). |
+| **Disambiguation storage** | **`disambiguation_sessions`** when **user** must **pick** **among** **distinct** **labels**; **no** **session** **row** **required** for **auto**-**resolved** **same**-**label** **collapse** path. In-memory only for **single-replica** dev. **No** Redis. |
+| **Config** | `bot/internal/config`: `DATABASE_URL`, **`LST_METADATA_ENABLE_*`**, `SPOTIFY_*`, `LASTFM_API_KEY`, `MUSICBRAINZ_USER_AGENT`; **no** secrets in `Default` or user chat. |
+| **Testing** | `go test ./...`; fakes for **orchestrator**; **table** **cases** for: **all** **flags** **off**; **duplicate** **labels** **→** **no** **disambig** **UI**; **two** **distinct** **labels** **→** **session** + **pick**. |
 | **Target platform** | Linux containers for bot + DB; local Windows/macOS dev via Compose. |
-| **Performance** | User-visible target **&lt; 15 s** for a full search+pick; metadata **&lt; 10 s** budget per [spec](spec.md). **N/A** for huge throughput in v1. |
-| **Constraints** | Comply with provider ToS; respect MusicBrainz **User-Agent** and rate; **no** secrets in logs. |
+| **Performance** | User-visible **&lt; 15 s** for search + pick; metadata budget **&lt; 10 s** per [spec](spec.md). **N/A** for huge throughput in v1. |
+| **Constraints** | Provider **ToS**; MusicBrainz **1 rps** + **User-Agent**; **no** secrets in **logs** ([spec](spec.md) **FR-007**). |
 
 ## Constitution Check
 
@@ -32,15 +32,15 @@ Add the **`save_album`** / Telegram **`/album`** flow: free-form user text → *
 
 - **I — Code quality**: Migrations in VCS; `golangci-lint` already in `bot/`.
 - **II — REST API**: N/A (no new public HTTP product API for this feature).
-- **III — Testing**: Fakes for orchestrator; DB tests with Docker or in-memory fakes; critical paths in CI.
-- **IV — UX**: New `/album` and **disambig** copy in **core**; help updated.
+- **III — Testing**: Fakes for orchestrator + **label**-**dedup** **cases**; DB tests with Docker or in-memory fakes; critical paths in CI.
+- **IV — UX**: `/album`, **disambig** **(two** **distinct** **lines** **max)**, and **no** **duplicate** **identical** **labels**; help updated.
 - **V — Monitoring**: Log provider + error **class**; optional metrics for breaker opens (future).
 - **VI — Logging**: No API keys, no DB URLs, no PII in default logs.
 - **VII — Performance**: Stated in Technical Context; **N/A** for “millions of RPS.”
-- **VIII — Containerization**: **Update** [compose.yaml](../../compose.yaml) (repo root) with `postgres:15` + volume (**no** Redis service). **Update** [bot/Dockerfile](../../bot/Dockerfile) only as needed; document env in [quickstart](quickstart.md).
-- **IX — Docs**: This plan, [data-model](data-model.md), [quickstart](quickstart.md), and root [README](../../README.md) (small subsection in implementation phase).
+- **VIII — Containerization**: [compose.yaml](../../compose.yaml) with `postgres:15` + volume (**no** Redis). [bot/Dockerfile](../../bot/Dockerfile) as needed; [quickstart](quickstart.md) for env.
+- **IX — Docs**: This plan, [data-model](data-model.md), [quickstart](quickstart.md), contracts, root [README](../../README.md) as implementation proceeds.
 
-**Re-check after Phase 1 design**: Migrations and contracts are listed; no constitution conflict.
+**Re-check after Phase 1 design**: Contracts include **label** **collapse**; no constitution conflict.
 
 ## Project Structure
 
@@ -64,11 +64,11 @@ bot/
 ├── go.mod
 ├── cmd/bot/main.go
 ├── internal/
-│   ├── config/            # + DATABASE_URL, API keys
-│   ├── core/              # + save_album command, AlbumCandidate, orchestrator **port**
-│   ├── adapter/telegram/  # + /album, buttons, disambiguation callbacks, pick by number
-│   ├── metadata/          # NEW: subpackages musicbrainz, lastfm, itunes, orchestrator, breaker
-│   └── store/ or repo/   # NEW: pg listeners + saved_albums + disambiguation_sessions, migrate hook
+│   ├── config/            # + DATABASE_URL, LST_METADATA_ENABLE_*, SPOTIFY_*, LASTFM_*, etc.
+│   ├── core/              # save_album, AlbumCandidate, FormatAlbumLabel, collapse-by-label, orchestrator **port**
+│   ├── adapter/telegram/  # /album, buttons, disambiguation callbacks, pick by number; never two identical label buttons
+│   ├── metadata/          # spotify, itunes, lastfm, musicbrainz, orchestrator, breaker
+│   └── store/             # pg listeners + saved_albums + disambiguation_sessions, migrate hook
 ├── migrations/
 │   ├── 000001_init_listeners_saved_albums_disambig.up.sql
 │   ├── 000001_init_listeners_saved_albums_disambig.down.sql
@@ -81,22 +81,24 @@ bot/
 
 **Make / scripts** (optional in tasks): `scripts/migrate.sh` or `Makefile` with `make migrate-up`.
 
-**Structure decision**: **Hexagon** already used: **new** `internal/core` **domain** types + **orchestrator** **interface**; **adapters** for HTTP (metadata), **Postgres** (persistence), **Telegram** (UI). `godotenv` and config stay as in 002.
+**Structure decision**: **Hexagon** as today: **domain** in `internal/core` (including **one** **shared** **function** to **format** **`ALBUM_TITLE | ARTIST (YEAR)`** and **deduplicate** **by** that **string** before **offering** **UI**); **adapters** for HTTP metadata, **Postgres**, **Telegram**.
 
 ## Key implementation notes (for **/speckit.tasks**)
 
-1. **Migrations** run **before** or **on** first boot for dev only—**prod** should run `migrate` as an **init container** or job; document both.
-2. **Circuit breaker**: failure counts and cooldown (e.g. 30s) as **const**s or small config struct.
-3. **Disambiguation**: `disambiguation_sessions` rows with `expires_at` (~15m); cleanup on read or cron; in-memory fallback only for **single-process** dev.
-4. **iTunes** response mapping: `collectionName`, `artistName`, `releaseDate` → year.
+1. **Label formatting + collapse (FR-009)**: After `Search` returns candidates (per orchestrator policy): map each to the user-visible **`ALBUM_TITLE | ARTIST (YEAR)`** string; order by relevance; **deduplicate by identical label** keeping the **first** (highest-relevance) row per label. If **only one distinct label** remains, **do not** open a disambiguation prompt or `disambiguation_sessions` row—**persist** the kept candidate like a single strong match. If **two distinct labels** remain, cap to top two by relevance and proceed with session + UI + **Other**.
+2. **Migrations** run **on** **boot** **only** where **`AUTO_MIGRATE`** = dev pattern; **prod** **init** **job** / **sidecar**; document both.
+3. **Circuit** **breaker**: failure counts and cooldown (e.g. 30s) as **const**s or small config struct.
+4. **Disambiguation** **session**: create **only** when **UI** **shows** **two** **distinct** **labels** + user must pick; `expires_at` (~15m); cleanup on read or cron.
+5. **iTunes** / **Spotify** **mapping**: title, **primary** **artist**, **year** for **label** and **persistence** fields.
 
 ## Complexity Tracking
 
 | Item | Why needed | Simpler alternative rejected because |
 |------|------------|----------------------------------------|
-| **3 providers** + breakers | Free tiers throttle or fail; spec requires not blocking on one vendor | One API only breaks during outages. |
-| **Postgres** + **migrations** | Durable `listeners` + `saved_albums` + auditability; constitution **VIII** for real apps | In-memory / SQLite: weak for future multi-replica. |
-| **`disambiguation_sessions` in Postgres** | **FR-009** needs shared state across replicas; no Redis per product decision | In-memory only fails for horizontal scale. |
+| **4** **catalogs** + breakers + flags | Spec **FR-002**; **throttle** / **outage** on one **vendor** | One API only breaks when that API fails. |
+| **Postgres** + **migrations** | Durable `listeners` + `saved_albums`; constitution **VIII** | In-memory / SQLite: weak for multi-replica. |
+| **`disambiguation_sessions` in Postgres** | **FR-009** shared state for **true** two-choice **steps**; no Redis | In-memory only fails horizontal scale. |
+| **Label**-**level** **dedup** in **core** | **SC-007** / **duplicate** **button** **bug**; spec **amendment** | Raw-only **UI** without **dedup** **reopens** **regression**. |
 
 ## Phase 2 reminder
 
@@ -104,7 +106,7 @@ bot/
 
 ## Related links
 
-- [research.md](research.md) — API comparison, breaker, migration tool.
-- [data-model.md](data-model.md) — DDL and constraints.
-- [contracts/album-command.md](contracts/album-command.md) — domain + Telegram.
-- [contracts/metadata-orchestrator.md](contracts/metadata-orchestrator.md) — `Search` port and `AlbumCandidate`.
+- [research.md](research.md) — API order, **flags**, breaker, **label** **dedup** note.
+- [data-model.md](data-model.md) — DDL; **session** when **2** **distinct** **offers**.
+- [contracts/album-command.md](contracts/album-command.md) — domain + Telegram, **single**-**path** after **collapse**.
+- [contracts/metadata-orchestrator.md](contracts/metadata-orchestrator.md) — `Search` port, **cap** **&** **dedup** **rules**.

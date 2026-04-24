@@ -1,156 +1,136 @@
 # Tasks: LifeSoundTrack — save album command (003)
 
-**Last validated** (`/speckit-tasks`): 2026-04-23 — structure and IDs unchanged; design alignment re-checked against [plan.md](plan.md), [spec.md](spec.md), [data-model.md](data-model.md), [contracts/](contracts/).
+**Regenerated**: 2026-04-24 (`/speckit-tasks`) | **Prerequisite script**: [`.specify/scripts/bash/check-prerequisites.sh --json`](../../.specify/scripts/bash/check-prerequisites.sh) (paths from [`.specify/feature.json`](../../.specify/feature.json) → `specs/003-save-album-command`).
 
-**Input**: Design documents from `specs/003-save-album-command/`
+**Input**: [plan.md](plan.md), [spec.md](spec.md), [data-model.md](data-model.md), [contracts/](contracts/), [research.md](research.md), [quickstart.md](quickstart.md)
 
-**Prerequisites**: [plan.md](plan.md), [spec.md](spec.md) (stories **US1**, **US1b**, **US2**, **US3**, **US4**), [research.md](research.md), [data-model.md](data-model.md), [contracts/album-command.md](contracts/album-command.md), [contracts/metadata-orchestrator.md](contracts/metadata-orchestrator.md), [quickstart.md](quickstart.md)
+**Context (authoritative)**: Metadata **Spotify → iTunes → Last.fm → MusicBrainz** with **`LST_METADATA_ENABLE_*`** **flags**; disambig **≤2** **distinct** **`ALBUM_TITLE | ARTIST (YEAR)`** **lines** + **Other** when needed; **no** **Redis**; **PostgreSQL** `disambiguation_sessions` **only** when a **true** two-choice list is shown. **2026-04-24** — **FR-009** / **SC-007**: **collapse** **candidates** **sharing** the **same** **user-visible** **label** before **any** disambig **prompt**; **first** in **relevance** **order** **wins** among **equivalents**; if **one** **distinct** **label** **remains** → **save** **without** **session** (see [contracts/album-command.md](contracts/album-command.md) **single_effective_match**).
 
-**Principle**: **No Redis**; disambiguation in **PostgreSQL** `disambiguation_sessions` and/or in-process memory for single-process dev. **godotenv** / config patterns stay in `bot/internal/config`; new work in `bot/internal/core`, `bot/internal/metadata/`, `bot/internal/store/`, `bot/internal/adapter/telegram/`.
+**Principle**: **No Redis**; **provider** on `core.AlbumCandidate` per [contracts/metadata-orchestrator.md](contracts/metadata-orchestrator.md).
 
-**Format**: Every task is `- [ ] TNNN [P?] [USn?] Description` with a concrete `bot/...` or `specs/003-...` path.
+**Format**: `- [ ]` or `- [X]` + `TNNN` + optional `[P]` + `[USn]` on story tasks + **concrete** `bot/...` or `specs/...` paths.
 
-**Tests** (per [spec NFR — Testing](spec.md)): include unit/integration tasks for **orchestrator**, **DB store**, and **disambig** paths; optional **testcontainers** for Postgres.
-
-**Note**: `check-prerequisites.sh --json` succeeds on feature branch **`003-save-album-command`**. Canonical dir: [`.specify/feature.json`](../../.specify/feature.json) → `specs/003-save-album-command/`.
+**Note**: `setup-plan.sh` can **overwrite** [plan.md](plan.md) — back up before running it.
 
 ---
 
-## Phase 1: Setup (dependencies & local stack)
+## Phase 1: Setup (dependencies and env surface)
 
-**Purpose**: Add Go modules and Docker Compose so Postgres-backed development is possible; align with [plan.md](plan.md) and constitution **VIII** in [`.specify/memory/constitution.md`](../../.specify/memory/constitution.md).
+**Purpose**: Tooling; no new `go mod` work expected beyond Spotify stdlib; env surface documented.
 
-- [X] T001 Add dependencies in `bot/go.mod`: e.g. `github.com/jackc/pgx/v5`, `github.com/sony/gobreaker`, `github.com/golang-migrate/migrate/v4` (and Postgres driver for migrate); run `go mod tidy` in `bot/`
-- [X] T002 [P] Extend root `compose.yaml` with **PostgreSQL 15+** (named volume, `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB`, healthcheck); **no** Redis service; document port and env in `specs/003-save-album-command/quickstart.md` in the same change or when completing **T030**–**T031** (US4 docs)
-- [X] T003 [P] Add or extend `bot/.env.example` with `DATABASE_URL`, `LASTFM_API_KEY` (optional), and a note on **MusicBrainz** `User-Agent` / rate policy per [research.md](research.md)
+- [X] T001 [P] Confirm `bot/go.mod` includes `github.com/sony/gobreaker` and HTTP/JSON stdlib; run `go mod tidy` in `bot/` if any new direct deps are added for Spotify (e.g. none if using stdlib only)
 
-**Checkpoint**: `docker compose up -d` starts Postgres; `bot/go.mod` contains new `require` blocks.
+**Checkpoint**: `go build -C bot ./...` passes before orchestrator changes.
 
 ---
 
-## Phase 2: Foundational (migrations, config, ports, store skeleton)
+## Phase 2: Foundational — config, feature flags, Spotify adapter, chain refactor
 
-**Purpose**: **Blocking** for all user stories: schema, config, `MetadataOrchestrator` **port**, store access, and chained **orchestrator** per [contracts/metadata-orchestrator.md](contracts/metadata-orchestrator.md).
+**Purpose**: **BLOCKS** all user-story work for **FR-002**. Wire **`LST_METADATA_ENABLE_*`**, **Spotify** **Client** **Credentials** **`bot/internal/metadata/spotify.go`**, **refactor** `bot/internal/metadata/orchestrator.go` to **Spotify → iTunes → Last.fm → MusicBrainz**; **if** all flags **off** → **`core.ErrAllProvidersExhausted`** before HTTP.
 
-- [X] T004 Add `golang-migrate` SQL `bot/migrations/000001_init_listeners_saved_albums_disambig.up.sql` and matching `.down.sql` implementing [data-model.md](data-model.md) tables `listeners`, `saved_albums`, `disambiguation_sessions` (incl. `pgcrypto` / `gen_random_uuid()`)
-- [X] T005 Extend `bot/internal/config` to load `DATABASE_URL`, `LASTFM_API_KEY` (optional), and a **fixed app** `User-Agent` string for **MusicBrainz** (e.g. `LifeSoundTrack/1.0 (+repo-url)`) with **no** secrets in `Default`
-- [X] T006 [P] Create `bot/internal/store/`: `OpenPool(ctx, databaseURL)` with `pgxpool.Pool` and a helper to run `migrate` **up** from `bot/migrations` (document in `bot/README.md` or quickstart: dev auto-migrate vs. prod init job)
-- [X] T007 [P] In `bot/internal/core/`, add domain types: `AlbumCandidate` and save-flow result kinds per [contracts/album-command.md](contracts/album-command.md) (`empty_query`, `candidates`, `single_match`, `no_match`, `provider_exhausted`, `saved`) and wire names to [contracts/metadata-orchestrator.md](contracts/metadata-orchestrator.md)
-- [X] T008 Define `MetadataOrchestrator` **interface** in `bot/internal/core` (or `bot/internal/metadata`) as in [contracts/metadata-orchestrator.md](contracts/metadata-orchestrator.md)
-- [X] T009 [P] Implement `bot/internal/metadata/musicbrainz`: `release` search, **1 rps** throttle, JSON parse to `[]AlbumCandidate`, **User-Agent** on every request
-- [X] T010 [P] Implement `bot/internal/metadata/lastfm` for `album.search` when `LASTFM_API_KEY` is set; map to `AlbumCandidate` (or skip this ring if no key)
-- [X] T011 [P] Implement `bot/internal/metadata/itunes` (Search API) mapping `collectionName`, `artistName`, `releaseDate` → `AlbumCandidate` per [plan.md](plan.md)
-- [X] T012 Implement `bot/internal/metadata/orchestrator` chaining **MusicBrainz → Last.fm → iTunes** with **gobreaker** per provider, cooldown, and `ErrNoMatch` / `ErrAllProvidersExhausted` per [metadata-orchestrator.md](contracts/metadata-orchestrator.md)
-- [X] T013 [P] Store methods: `UpsertListener`, `InsertSavedAlbum`, `CreateDisambiguationSession`, `GetDisambiguationSession`, `DeleteDisambiguationSession` in `bot/internal/store/` per [data-model.md](data-model.md)
-- [X] T014 Wire `bot/cmd/bot/main.go`: after config load, open store pool; optional **dev-only** `migrate` up; pass pool + `MetadataOrchestrator` (and disambig / save deps) into `telegram.Run` (signature change) or a small `internal/app` wire package
+- [X] T002 [P] Add `parseMetadataBool` (or equivalent) in `bot/internal/config/config.go`: env unset → **true**; `true`/`1`/`yes`/`on` → true; `false`/`0`/`no`/`off` (case-insensitive) → false
+- [X] T003 [P] Extend `Config` in `bot/internal/config/config.go` with: `LST` flags as four `bool` fields, `SpotifyClientID` / `SpotifyClientSecret` as `string`
+- [X] T004 Update `config.FromEnv()` in `bot/internal/config/config.go` to read `LST_METADATA_ENABLE_SPOTIFY`, `LST_METADATA_ENABLE_ITUNES`, `LST_METADATA_ENABLE_LASTFM`, `LST_METADATA_ENABLE_MUSICBRAINZ`, `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET` per [quickstart.md](quickstart.md)
+- [X] T005 [P] Update `bot/.env.example` (or canonical env sample) with all new variables and a one-line pointer to [specs/003-save-album-command/quickstart.md](quickstart.md)
+- [X] T006 [P] Implement `bot/internal/metadata/spotify.go`: OAuth **client credentials** + album search, map to `[]core.AlbumCandidate`, set `Provider: "spotify"`, `ProviderRef`, `ArtURL`/`Genres`/`Year` when present; follow Spotify docs for headers/ToS
+- [X] T007 Add **four** breakers in `bot/internal/metadata/orchestrator.go` (names `spotify`, `itunes`, `lastfm`, `musicbrainz`); align with [contracts/metadata-orchestrator.md](contracts/metadata-orchestrator.md)
+- [X] T008 Refactor `(*Chain).Search` in `bot/internal/metadata/orchestrator.go`: **(1)** no enabled catalogs → `core.ErrAllProvidersExhausted`; **(2)** each enabled step in order; **(3)** first non-empty `[]core.AlbumCandidate` with `capTop2`; **(4)** fallthrough on empty/flag/skip; **(5)** Spotify enabled but creds missing → log **Warn** (no secret value) and fall through per [plan.md](plan.md)
+- [X] T009 Wire new **config** into **`metadata.NewChain`** and **`bot/cmd/bot/main.go`** (and test constructors in `bot/internal/metadata/*_test.go`)
 
-**Checkpoint**: `go build ./...` in `bot/`; `migrate up` creates tables; `Search("test")` returns candidates in a unit test with HTTP **mocked** or a fake `MetadataOrchestrator`.
+**Checkpoint**: `go test -C bot ./...` passes; all flags false → `ErrAllProvidersExhausted` without HTTP; Spotify off + iTunes on can return candidates.
 
 ---
 
-## Phase 3: User Story 1 — Free-form single-match save (Priority: P1) — MVP
+## Phase 3: User Story 1 — Free-form single-match save (Priority: P1)
 
-**Goal**: Non-empty free-form text → metadata → one **plan-defined** high-confidence match → persist **listener** + `saved_albums`; **empty** query → help, **no** provider call ([spec](spec.md) **US1**).
+**Goal**: Non-empty query → **metadata** → **single** strong match → **persist**; empty → help, no `Search` ([spec](spec.md) **US1**).
 
-**Independent test**: `/album <query>` returns one top candidate; row in `saved_albums`; `/album` alone — no `Search` call, no new album row.
-
-- [X] T015 [US1] In `bot/internal/core/`, implement the **save** path: `Search`, if **exactly one** top candidate (policy: single-match threshold), `UpsertListener` + `InsertSavedAlbum` and return `saved` with a short user-facing line per [spec](spec.md) and [data-model.md](data-model.md)
-- [X] T016 [US1] In `bot/internal/adapter/telegram/`, register `/album` **handler**; **trim** query; on **empty** return core outcome `empty_query` and do **not** call `Search`
-- [X] T017 [US1] Map Telegram `User` → `UpsertListener` fields (`source=telegram`, `external_id` as string, `display_name`, `username`) per [spec](spec.md) **US3** (minimal wiring; full “every path” upsert in **T028**)
-- [X] T018 [US1] Enforce `query` **max length** (e.g. **512 runes** per [contracts/album-command.md](contracts/album-command.md)) in the Telegram adapter and/or core; on exceed, return a short **“too long”** hint and **no** `Search` (or truncated search if spec/docs explicitly choose truncation — must match [quickstart.md](quickstart.md) / contract)
-- [ ] T019 [P] [US1] Unit tests: `TestEmptyQuery`, `TestSingleMatchSaves` (and optional over-long query) with **fake** `MetadataOrchestrator` and store fake or `sqlmock` in `bot/internal/core/*_test.go` and/or `bot/internal/store/*_test.go`
-
-**Checkpoint**: With real bot + Postgres: one successful single-match save; empty `/album` and over-limit query do not call live metadata inappropriately.
+- [X] T010 [US1] In `bot/internal/core/save_album_test.go`, keep/adjust fakes for `single_match` / **`Provider: "spotify"`** where relevant
+- [X] T011 [P] [US1] In `bot/internal/adapter/telegram/`, re-verify **empty** query and **512**-rune cap per [contracts/album-command.md](contracts/album-command.md)
 
 ---
 
-## Phase 4: User Story 1b — Disambiguation (2–3 options) (Priority: P1)
+## Phase 4: User Story 1b — Disambiguation (≤2 distinct labels + Other) (Priority: P1)
 
-**Goal**: **2+** candidates → show **up to 3** by relevance; **inline buttons** or **numbered** follow-up; **no** `InsertSavedAlbum` until **pick**; state in `disambiguation_sessions` / Postgres ([FR-009](spec.md), [plan.md](plan.md)).
+**Goal**: **Two** **or** **more** **distinct** **`ALBUM_TITLE | ARTIST (YEAR)`** **labels** → **at** **most** **2** + **Other**; **no** **save** **until** **pick**; **Other** = refinement only ([spec](spec.md) **US1b**, **FR-009**).
 
-**Independent test**: Fake orchestrator returns **≥2** candidates; user picks **2**; one correct `saved_albums` row; **no** row before pick.
+- [X] T012 [US1b] Ensure orchestrator `capTop2` and `bot/internal/adapter/telegram/` use **≤2** **rows** in session JSON for the **offered** list
+- [X] T013 [P] [US1b] Adjust `bot/internal/core/save_album_test.go` disambig tests for **Spotify** / **relevance** if assumptions broke
 
-- [X] T020 [US1b] In `bot/internal/core/`, when `Search` returns **2+** candidates, return `candidates` (bounded, sorted); **no** `InsertSavedAlbum` until a **Pick** with 1-based index
-- [X] T021 [US1b] Persist disambig in `disambiguation_sessions` with `candidates` JSONB and `expires_at` (e.g. 15m) in `bot/internal/store/`
-- [X] T022 [US1b] In `bot/internal/adapter/telegram/`, send **inline keyboard** (1..N) when available; else **numbered** message body per [contracts/album-command.md](contracts/album-command.md)
-- [X] T023 [US1b] Handle **callback** and **next message** digits **1**–**3**: load session, `InsertSavedAlbum` for that candidate, `DeleteDisambiguationSession`, confirm; expired/unknown session: safe user copy
-- [ ] T024 [P] [US1b] Test: two candidates, pick second → persisted row matches; **assert no** `InsertSavedAlbum` before pick
-
-**Checkpoint**: “Red”-style disambig in sandbox; **FR-009** satisfied.
+**Checkpoint**: **SC-005** and **disambig** with **two** **different** **labels** still verifiable in tests
 
 ---
 
-## Phase 5: User Story 2 — Safe failure (no leak, no false save) (Priority: P1)
+## Phase 4b: User Story 1b — Equivalent label collapse (SC-007 / FR-009) 🎯
 
-**Goal**: **no_match**, **provider_exhausted**, and transient errors → short, safe messages; **no** new `saved_albums` on failure ([spec](spec.md) **US2**, **SC-002**).
+**Goal**: If **all** raw candidates **share** one user-visible label (`formatAlbumLine` in `bot/internal/core/save_album.go`), **do not** show disambig (no two identical lines, no pointless `disambiguation_sessions` row)—**persist** the **first** (highest-relevance) row among equivalents per [spec](spec.md) and [contracts/album-command.md](contracts/album-command.md) **single_effective_match**.
 
-**Independent test**: Fakes for empty search, open breakers, 503; **no** new `saved_albums` row; logs show **class**, not full HTTP body at default level.
+**Independent test**: Fake `Search` returns **≥2** `AlbumCandidate` with **identical** `formatAlbumLine` → **`OutcomeSaved`** (or same path as one raw match) and **no** `CreateDisambiguationSession` / **`OutcomeDisambig` with duplicate labels**; two **different** **labels** → still **`OutcomeDisambig`** with **2** **distinct** **button** **texts**.
 
-- [X] T025 [US2] In core, map `ErrNoMatch` / `ErrAllProvidersExhausted` and transient errors to user copy; log **error class** + `provider=`, not raw secrets or full JSON body ([FR-007](spec.md))
-- [X] T026 [US2] In `bot/internal/adapter/telegram/`, **never** `InsertSavedAlbum` on `no_match` / `provider_exhausted` / error paths; align with [contracts/album-command.md](contracts/album-command.md)
-- [ ] T027 [P] [US2] Tests: no match, all providers failing; assert **no** new `saved_albums` (store fake or test DB)
+- [X] T026 [US1b] In `bot/internal/core/`, implement **deduplication** **by** `formatAlbumLine` **(see** `save_album.go`) **preserving** **relevance** **order** **(first** **occurrence** **wins)**: e.g. new **`dedupeCandidatesByAlbumLine([]AlbumCandidate) []AlbumCandidate`** in `bot/internal/core/candidates.go` (or `save_album.go`). **After** `Search`, run **dedupe** **before** **`len(cands)`** **branching**: if **deduped** **len** **==** **1** **(including** **N**-**raw**-**rows**-**same**-**label)**, call **`persistSave`** like **single**-**result**; if **≥** **2** **distinct** **labels**, use **`deduped[:min(2,len)]` or** walk **to** **first** **two** **distinct** **—** must **not** **slice** **raw** `cands[:2]` **without** **dedupe** first
+- [X] T027 [P] [US1b] In `bot/internal/core/save_album_test.go`, add table cases: **(a)** two candidates same `formatAlbumLine` different `ProviderRef` → **no** disambig / **one** **save**; **(b)** two different labels → disambig with **2** **distinct** **labels** in **`AlbumButtonLabels`**
+- [X] T028 [US1b] In `bot/internal/adapter/telegram/`, ensure inline/reply buttons (or text list) never show two identical strings for album rows (defensive if core already dedupes); run `go test ./...` covering `bot/internal/adapter/telegram/` as needed
 
-**Checkpoint**: Spot-check: `LOG_LEVEL=INFO` has no token/DSN; matches **SC-002** / **SC-003** intent.
-
----
-
-## Phase 6: User Story 3 — Listener profile updates (Priority: P1)
-
-**Goal**: `UpsertListener` on every successful listener touch; **one** row per `(source, external_id)`; **update** `display_name` / `username` on change ([spec](spec.md) **US3**).
-
-**Independent test**: Two saves with different mocked **names**; **one** `listeners` row, **updated** `updated_at`.
-
-- [X] T028 [US3] On every `/album` and disambiguation resolution path, pass **current** Telegram user into `UpsertListener` in `bot/internal/adapter/telegram/` + `bot/internal/store/`
-- [ ] T029 [P] [US3] Test or integration check: `UNIQUE (source, external_id)` and **update** path
-
-**Checkpoint**: No duplicate `listeners` rows for the same Telegram user.
+**Checkpoint**: [spec](spec.md) **SC-007** **and** **FR-009** **collapse** **clause** **covered** by **T027** **+** **manual** **smoke** in [quickstart.md](quickstart.md) **§7**
 
 ---
 
-## Phase 7: User Story 4 — Documentation and discovery (Priority: P2)
+## Phase 5: User Story 2 — Safe failure, flags, fallthrough (Priority: P1)
 
-**Goal**: New contributors can run the feature using docs; link **001** and **002** as needed ([spec](spec.md) **US4**).
+- [X] T014 [US2] In `bot/internal/core/`, map `ErrAllProvidersExhausted` to `OutcomeProviderExhausted` and `tryAgainCopy()`-style messages without env names in chat
+- [X] T015 [P] [US2] `bot/internal/metadata/orchestrator_test.go`: all flags false; Spotify empty, iTunes returns candidates; optional breaker
+- [X] T016 [US2] In `bot/internal/adapter/telegram/`, no `InsertSavedAlbum` on `OutcomeProviderExhausted` / `no_match`
 
-**Independent test**: Another developer follows [quickstart.md](quickstart.md) with a sandbox token and local Postgres and completes a **save** and a **no-match** path.
+---
 
-- [X] T030 [P] [US4] Update `bot/README.md` with `/album`, `DATABASE_URL`, `migrate` command, and link to [specs/003-save-album-command/quickstart.md](quickstart.md)
-- [X] T031 [P] [US4] Add a short subsection to root `README.md` for feature **003** and link to [quickstart.md](quickstart.md) and [001 quickstart](specs/001-lifesoundtrack-bot-commands/quickstart.md) where useful
-- [X] T032 [US4] Update [specs/001-lifesoundtrack-bot-commands/contracts/messaging-commands.md](specs/001-lifesoundtrack-bot-commands/contracts/messaging-commands.md) to document domain **`save_album` / `album` →** `/album` to avoid **001** vs **003** drift (add an amendment line if 001 v1 “out of scope” text applies)
+## Phase 6: User Story 3 — Listener profile (Priority: P1)
 
-**Checkpoint**: [quickstart.md](quickstart.md) steps 1–4 are reproducible with **T002** compose and **T030**–**T031** doc updates.
+- [X] T017 [P] [US3] Re-verify `bot/internal/store/` **UpsertListener** on save + disambig **complete** **paths** in `bot/internal/adapter/telegram/`
+
+---
+
+## Phase 7: User Story 4 — Documentation (Priority: P2)
+
+- [X] T018 [P] [US4] `bot/README.md`: **`LST_METADATA_*`**, **`SPOTIFY_*`**, link to [quickstart.md](quickstart.md)
+- [X] T019 [P] [US4] Root `README.md`: one line chain order + pointer to **003** **quickstart**
+- [X] T020 [US4] Re-read [specs/003-save-album-command/quickstart.md](quickstart.md) against `config.FromEnv()` after config changes; fix drift
 
 ---
 
 ## Phase 8: Polish and cross-cutting
 
-- [X] T033 [P] Update `bot/internal/core/copy.go` and `command.go` (or adjacent files) so **/help** and **/start** mention **`/album`** per constitution **IV** in [`.specify/memory/constitution.md`](../../.specify/memory/constitution.md)
-- [X] T034 [P] Update `bot/Dockerfile` and root `compose.yaml` **bot** service to pass `DATABASE_URL` and copy `bot/migrations` as needed
-- [ ] T035 [P] Run `golangci-lint run ./...` in `bot/` and fix or narrowly document `nolint`
-- [X] T036 From `bot/`, run `go test ./... -count=1` and `go vet ./...` clean
-- [ ] T037 (optional) [P] If repo adds CI, add a job: `migrate -path bot/migrations -database "$DATABASE_URL" up` then `go test` against an ephemeral Postgres
-- [X] T038 [P] Log audit: `slog` in metadata, store, and adapter paths does not log `TELEGRAM_BOT_TOKEN`, `DATABASE_URL` password, or full provider JSON at **Info** (per [FR-007](spec.md))
+- [ ] T021 [P] Run `golangci-lint run ./...` in `bot/`; fix or narrow `//nolint` with comment per constitution **I**
+- [X] T022 [P] Run `go test ./... -count=1` and `go vet ./...` from `bot/`
+- [X] T023 [P] Log audit: no secrets at `slog` **Info** on new paths ([spec](spec.md) **FR-007**)
+- [ ] T024 (optional) [P] If CI exists: `migrate` + `go test` on ephemeral Postgres
+- [X] T025 [P] Update [specs/001-lifesoundtrack-bot-commands/contracts/messaging-commands.md](specs/001-lifesoundtrack-bot-commands/contracts/messaging-commands.md) if `/album` or env out of date
+- [X] T029 [P] [US4] After **T026–T028**, update [specs/003-save-album-command/quickstart.md](quickstart.md) **§5–7** if behavior/copy changed; **confirm** **duplicate**-**label** **smoke** **bullet** **matches** **reality** *(no copy change required; §5/§7 already describe collapse; **verified** **against** **`TestProcessAlbumQuery_DuplicateUserVisibleLabelSavesFirst`**)*
 
-**Checkpoint**: Tests green; contracts still match the code.
+**Checkpoint**: **merge-ready** when **T026–T028** + **T021** (or documented lint waiver) are satisfied
 
 ---
 
 ## Dependencies and execution order
 
-1. **T001**–**T003** (Setup) before **T004**+.
-2. **T004**–**T014** (Foundational) before **all** user stories.
-3. **US1 (T015–T019)** before or overlapping **US1b**; **T020**–**T024** need **T015** core result types in place.
-4. **US2 (T025–T027)** after search + adapter paths exist; can overlap **US3 (T028–T029)**.
-5. **US4 (T030–T032)** and **Polish (T033–T038)** after main flows are stable.
+1. **T001** → **T002**–**T005** (parallel where **[P]**); **T004** after **T002**–**T003**
+2. **T006** then **T007**–**T008** → **T009**
+3. **T010**–**T020** after **T009** (overlap allowed)
+4. **T026** **depends** on **T008**–**T009** (stable `Search` + `AlbumCandidate`); **T027** with **T026**; **T028** after **T026**
+5. **T029** after **T026–T028**; **T021** any time in **Phase** **8** after code stable
 
----
+### User story order
 
-## Parallel example
+**Foundational (Phase 2)** → **US1** → **US1b (Phases 4+4b)** → **US2–US3** (already done) → **US4** → **Polish**
+
+### Parallel example
 
 ```text
-# After Foundational:
-# Dev A: T022–T023 (Telegram disambig)   Dev B: T019 (US1 tests) + T010 (Last.fm) [once interfaces exist]
-# After T015:
-# T018 (query cap) can pair with T017 (different files) if T015 is done first.
+# After T009:
+T010 + T011 + T014   # different areas
+
+# After T026:
+T027 [P]  # tests
+T028      # telegram (after core API stable)
 ```
 
 ---
@@ -159,44 +139,25 @@
 
 | Metric | Value |
 |--------|------:|
-| **Total tasks** | 38 (T001–T038) |
-| **MVP (smallest shippable slice)** | Phases 1–3 through **T019** (US1) + migrations |
-| **US1** | T015–T019 |
-| **US1b** | T020–T024 |
-| **US2** | T025–T027 |
-| **US3** | T028–T029 |
-| **US4** | T030–T032 |
-| **Polish** | T033–T038 |
+| **Total tasks** | **T001–T029** (29 tasks) |
+| **Open (default)** | **T021** (lint tool not on dev PATH), **T024** (optional **CI** **`migrate`**) |
+| **By user story** | US1: 2, US1b: 6 (incl. **T026–T028**), US2: 3, US3: 1, US4: 4 (incl. **T029**) |
+| **MVP for SC-007** | **T026**–**T029** **complete** (see **`save_album.go`** + **`run_test.go`**) |
 
-**Format validation**: All task lines use `- [ ] TNNN`, include `bot/...` or `specs/...` in the description, and use `[US#]` on user-story phase tasks (none on Setup, Foundational, or Polish—except T037 optional CI—per spec kit convention: Polish has no [US#]).
+**Parallel** **[P]**: T001–T002, T005, T006, T011, T013, T015, T017–T021, T023–T025, T027, T029
 
 ---
 
 ## Implementation strategy
 
-### MVP first (US1 only)
-
-1. **Phase 1** + **Phase 2** (through **T014**)
-2. **Phase 3** (through **T019**)
-3. **Stop**: confirm single-match + empty + over-long query behavior before disambig (Phase 4)
-
-### Incremental delivery
-
-1. Add **Phase 4** (US1b) → E2E disambig
-2. Add **Phase 5** (US2) if not already covered by **T015**+ error mapping
-3. **Phase 6** (US3) — tighten `UpsertListener` everywhere
-4. **Phase 7** (US4) + **Phase 8** (polish, lint, logs)
-
-### Parallel team (after Phase 2)
-
-- One dev: `bot/internal/metadata/*` and **T012**
-- Another: `bot/internal/store/*` + **T004**
-- Another: `bot/internal/core/*` + **T007** / **T008** — align on `AlbumCandidate` and errors first
+1. **If** **T001–T025** **already** **merged**: **start** at **T026** **(label** **dedupe** **in** **core**)**.  
+2. **Run** **T027** **tests** **before** **merge**.  
+3. **T021** + **T029** **before** **release** **or** **PR** **ready**.
 
 ---
 
-## Notes
+## Extension hooks (`.specify/extensions.yml`)
 
-- Migrations: **versioned** only; do not edit an applied `up` in place after deploy; add `000002_...` for schema changes.
-- **MusicBrainz** commercial use: [research.md](research.md) **non-commercial** assumption.
-- **iTunes** Search API: [Apple’s terms](https://www.apple.com/legal/internet-services/); **metadata** only.
+**`hooks.before_tasks`** (optional, `speckit.git.commit`): to run: `/speckit.git.commit` or commit manually.
+
+**`hooks.after_tasks`** (optional, `speckit.git.commit`): to run: `/speckit.git.commit` after reviewing **tasks.md**.

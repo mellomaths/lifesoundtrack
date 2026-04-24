@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/mellomaths/lifesoundtrack/bot/internal/store"
@@ -13,6 +15,16 @@ import (
 
 // MaxQueryRunes is the free-form /album text cap (contracts/album-command.md).
 const MaxQueryRunes = 512
+
+// SavePersistence is the store surface needed by [SaveService] (satisfied by *store.Store; mock in tests).
+type SavePersistence interface {
+	UpsertListener(ctx context.Context, source, externalID, displayName, username string) (*store.Listener, error)
+	DeleteDisambigForListener(ctx context.Context, listenerID string) error
+	CreateDisambiguationSession(ctx context.Context, listenerID string, candidatesJSON []byte, ttl time.Duration) (string, error)
+	InsertSavedAlbum(ctx context.Context, p store.InsertSavedAlbumParams) (id string, err error)
+	LatestOpenDisambiguationSession(ctx context.Context, source, externalID string) (*store.Session, []byte, error)
+	DeleteDisambiguationSession(ctx context.Context, sessionID string) error
+}
 
 // Outcome is the public state after handling an album line or pick.
 type Outcome int
@@ -24,6 +36,7 @@ const (
 	OutcomeProviderExhausted
 	OutcomeTransientError
 	OutcomeDisambig
+	OutcomeRefineQuery
 	OutcomeSaved
 	OutcomePickOutOfRange
 	OutcomeNoSession
@@ -33,13 +46,15 @@ const (
 type UserMessage struct {
 	Outcome Outcome
 	Text    string
-	// PickCount is 1–3 when Outcome == OutcomeDisambig (inline keyboard size).
+	// PickCount is 1 or 2 when Outcome == OutcomeDisambig (album rows; a separate "Other" control is UI-only).
 	PickCount int
+	// AlbumButtonLabels is one label per album row: "ALBUM_TITLE | ARTIST (YEAR)" (used by Telegram; max 2).
+	AlbumButtonLabels []string
 }
 
 // SaveService wires metadata search to persistence.
 type SaveService struct {
-	Store  *store.Store
+	Store  SavePersistence
 	Search MetadataOrchestrator
 	Log    *slog.Logger
 }
@@ -73,6 +88,10 @@ func (s *SaveService) ProcessAlbumQuery(ctx context.Context, source, externalID,
 	if len(cands) == 0 {
 		return UserMessage{Outcome: OutcomeNoMatch, Text: noMatchCopy()}, nil
 	}
+	cands = dedupeCandidatesByAlbumLine(cands)
+	if len(cands) == 0 {
+		return UserMessage{Outcome: OutcomeNoMatch, Text: noMatchCopy()}, nil
+	}
 	if len(cands) == 1 {
 		_, ums, err := s.persistSave(ctx, listener.ID, &cands[0], q, cands[0].Provider, cands[0].ProviderRef, cands[0].Title, cands[0].PrimaryArtist, cands[0].Year, cands[0].Genres, cands[0].ArtURL, nil)
 		if err != nil {
@@ -80,10 +99,10 @@ func (s *SaveService) ProcessAlbumQuery(ctx context.Context, source, externalID,
 		}
 		return ums, nil
 	}
-	// 2+ candidates: up to 3, store session, return disambig
+	// 2+ distinct user-visible labels: offer top 2 by relevance; "Other" is a separate UI path (no third album row in JSON).
 	top := cands
-	if len(top) > 3 {
-		top = top[:3]
+	if len(top) > 2 {
+		top = top[:2]
 	}
 	if err := s.Store.DeleteDisambigForListener(ctx, listener.ID); err != nil {
 		return UserMessage{}, err
@@ -96,10 +115,12 @@ func (s *SaveService) ProcessAlbumQuery(ctx context.Context, source, externalID,
 		return UserMessage{}, err
 	}
 	lines := formatCandidateLines(top, true)
+	labels := albumButtonLabels(top)
 	return UserMessage{
-		Outcome:   OutcomeDisambig,
-		Text:      "Pick the album (buttons or send 1–" + itoa(len(top)) + "):\n" + lines,
-		PickCount: len(top),
+		Outcome:           OutcomeDisambig,
+		Text:              "Pick the album (buttons, or send 1 or 2; send 3 for Other if none match):\n" + lines,
+		PickCount:         len(top),
+		AlbumButtonLabels: labels,
 	}, nil
 }
 
@@ -124,7 +145,15 @@ func (s *SaveService) ProcessPickByIndex(ctx context.Context, source, externalID
 	if err := json.Unmarshal(raw, &cands); err != nil {
 		return UserMessage{}, err
 	}
-	if oneBased < 1 || oneBased > len(cands) || oneBased > 3 {
+	// 3 = "Other" (only when two album rows are shown).
+	if oneBased == 3 {
+		if len(cands) == 2 {
+			_ = s.Store.DeleteDisambiguationSession(ctx, sess.ID)
+			return UserMessage{Outcome: OutcomeRefineQuery, Text: refineQueryCopy()}, nil
+		}
+		return UserMessage{Outcome: OutcomePickOutOfRange, Text: pickRangeCopy(len(cands))}, nil
+	}
+	if oneBased < 1 || oneBased > len(cands) || oneBased > 2 {
 		return UserMessage{Outcome: OutcomePickOutOfRange, Text: pickRangeCopy(len(cands))}, nil
 	}
 	c := cands[oneBased-1]
@@ -187,16 +216,53 @@ func strOrNil(s string) *string {
 	return &s
 }
 
+// dedupeCandidatesByAlbumLine keeps the first candidate for each user-visible
+// "ALBUM_TITLE | ARTIST (YEAR)" string (per formatAlbumLine), i.e. first in
+// relevance order among equivalent rows.
+func dedupeCandidatesByAlbumLine(cands []AlbumCandidate) []AlbumCandidate {
+	if len(cands) < 2 {
+		return cands
+	}
+	seen := make(map[string]struct{}, len(cands))
+	out := make([]AlbumCandidate, 0, len(cands))
+	for _, c := range cands {
+		key := formatAlbumLine(c)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, c)
+	}
+	return out
+}
+
+func formatAlbumLine(c AlbumCandidate) string {
+	var b strings.Builder
+	b.WriteString(c.Title)
+	if c.PrimaryArtist != "" {
+		b.WriteString(" | ")
+		b.WriteString(c.PrimaryArtist)
+	}
+	if c.Year != nil {
+		b.WriteString(" (")
+		b.WriteString(itoa(*c.Year))
+		b.WriteString(")")
+	}
+	return b.String()
+}
+
+func albumButtonLabels(cands []AlbumCandidate) []string {
+	labels := make([]string, 0, len(cands))
+	for _, c := range cands {
+		labels = append(labels, formatAlbumLine(c))
+	}
+	return labels
+}
+
 func formatCandidateLines(cands []AlbumCandidate, numbered bool) string {
 	var b string
 	for i, c := range cands {
-		line := c.Title
-		if c.PrimaryArtist != "" {
-			line += " — " + c.PrimaryArtist
-		}
-		if c.Year != nil {
-			line += fmt.Sprintf(" (%d)", *c.Year)
-		}
+		line := formatAlbumLine(c)
 		if numbered {
 			b += itoa(i+1) + ": " + line + "\n"
 		} else {
@@ -227,8 +293,18 @@ func noActivePickCopy() string {
 }
 
 func pickRangeCopy(n int) string {
-	if n <= 1 {
+	if n <= 0 {
+		return "Start a new search with /album."
+	}
+	if n == 1 {
 		return "Send 1 to pick the album, or start a new search with /album."
 	}
+	if n == 2 {
+		return "Send 1 or 2 to pick an album, 3 for Other, or use the buttons."
+	}
 	return fmt.Sprintf("Send a number from 1 to %d, or use the buttons.", n)
+}
+
+func refineQueryCopy() string {
+	return "Try a more specific /album line: include the full album title, the artist name, and the release year (e.g. the year on the cover)."
 }

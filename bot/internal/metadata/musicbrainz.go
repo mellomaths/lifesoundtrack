@@ -16,6 +16,9 @@ func (c *Chain) runMusicBrainzSearch(ctx context.Context, q string) ([]core.Albu
 	if c == nil {
 		return nil, fmt.Errorf("nil chain")
 	}
+	if !c.enableMusicBrainz {
+		return nil, nil
+	}
 	result, err := c.mbBrk.Execute(func() (any, error) {
 		c.mbThrottle.Wait()
 		u, err := url.Parse("https://musicbrainz.org/ws/2/release")
@@ -42,7 +45,7 @@ func (c *Chain) runMusicBrainzSearch(ctx context.Context, q string) ([]core.Albu
 		if err != nil {
 			return nil, err
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		if err != nil {
 			return nil, err

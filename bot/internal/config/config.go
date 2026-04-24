@@ -15,7 +15,14 @@ type Config struct {
 	MigrationsPath       string
 	LastfmAPIKey         string
 	MusicBrainzUserAgent string
-	AutoMigrate          bool
+	SpotifyClientID      string
+	SpotifyClientSecret  string
+	// Metadata feature flags: unset env → true (opt-out). See [spec FR-002].
+	MetadataEnableSpotify     bool
+	MetadataEnableITunes      bool
+	MetadataEnableLastfm      bool
+	MetadataEnableMusicBrainz bool
+	AutoMigrate               bool
 }
 
 // FromEnv returns config for the bot. DATABASE_URL and TELEGRAM_BOT_TOKEN are required
@@ -45,8 +52,33 @@ func FromEnv() (Config, error) {
 		MigrationsPath:       migrationsPath,
 		LastfmAPIKey:         lastfm,
 		MusicBrainzUserAgent: ua,
-		AutoMigrate:          autoM,
+		SpotifyClientID:      strings.TrimSpace(os.Getenv("SPOTIFY_CLIENT_ID")),
+		SpotifyClientSecret:  strings.TrimSpace(os.Getenv("SPOTIFY_CLIENT_SECRET")),
+		MetadataEnableSpotify:     parseMetadataFeatureFlag("LST_METADATA_ENABLE_SPOTIFY"),
+		MetadataEnableITunes:      parseMetadataFeatureFlag("LST_METADATA_ENABLE_ITUNES"),
+		MetadataEnableLastfm:      parseMetadataFeatureFlag("LST_METADATA_ENABLE_LASTFM"),
+		MetadataEnableMusicBrainz: parseMetadataFeatureFlag("LST_METADATA_ENABLE_MUSICBRAINZ"),
+		AutoMigrate:               autoM,
 	}, nil
+}
+
+// parseMetadataFeatureFlag returns true by default. Only explicit false/0/no/off
+// (case-insensitive) disable the flag; unset or empty is enabled.
+func parseMetadataFeatureFlag(key string) bool {
+	v, ok := os.LookupEnv(key)
+	if !ok {
+		return true
+	}
+	if strings.TrimSpace(v) == "" {
+		return true
+	}
+	s := strings.ToLower(strings.TrimSpace(v))
+	switch s {
+	case "0", "false", "no", "off", "n", "f":
+		return false
+	default:
+		return true
+	}
 }
 
 func parseLogLevel(s string) slog.Level {
