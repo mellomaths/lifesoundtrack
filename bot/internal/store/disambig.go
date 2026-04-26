@@ -41,6 +41,21 @@ func (s *Store) LatestOpenDisambiguationSession(ctx context.Context, source, ext
 	return &Session{ID: sid}, raw, nil
 }
 
+// OpenDisambiguationSessionForListener returns candidates JSON for an open session owned by the listener.
+// Returns [pgx.ErrNoRows] when the id is missing, expired, or not owned by listenerID.
+func (s *Store) OpenDisambiguationSessionForListener(ctx context.Context, sessionID, listenerID string) ([]byte, error) {
+	var raw []byte
+	err := s.pool.QueryRow(ctx, `
+		SELECT s.candidates
+		FROM disambiguation_sessions s
+		WHERE s.id = $1::uuid AND s.listener_id = $2::uuid AND s.expires_at > now()
+	`, sessionID, listenerID).Scan(&raw)
+	if err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
 // DeleteDisambiguationSession removes a session after a successful pick.
 func (s *Store) DeleteDisambiguationSession(ctx context.Context, sessionID string) error {
 	ct, err := s.pool.Exec(ctx, `DELETE FROM disambiguation_sessions WHERE id = $1`, sessionID)

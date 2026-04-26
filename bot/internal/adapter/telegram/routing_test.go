@@ -1,6 +1,7 @@
 package telegram
 
 import (
+	"context"
 	"testing"
 
 	"github.com/mellomaths/lifesoundtrack/bot/internal/core"
@@ -100,5 +101,39 @@ func TestParseRemovePickCallbackData(t *testing.T) {
 	}
 	if _, _, ok := parseRemovePickCallbackData("apick:1"); ok {
 		t.Fatal("expected false")
+	}
+}
+
+type spyRemovePickLib struct {
+	gotSource    string
+	gotExt       string
+	gotSessionID string
+	gotN         int
+}
+
+func (s *spyRemovePickLib) TryProcessRemovePick(ctx context.Context, source, externalID, sessionID string, oneBased int) (string, bool, error) {
+	s.gotSource = source
+	s.gotExt = externalID
+	s.gotSessionID = sessionID
+	s.gotN = oneBased
+	return "ok", true, nil
+}
+
+func TestTryRemovePickFromCallbackData_forwardsParsedSessionID(t *testing.T) {
+	t.Parallel()
+	sid := "550e8400-e29b-41d4-a716-446655440000"
+	spy := &spyRemovePickLib{}
+	text, handled, err := tryRemovePickFromCallbackData(context.Background(), spy, platformSource, "999", "rmp:"+sid+":2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !handled || text != "ok" {
+		t.Fatalf("handled=%v text=%q", handled, text)
+	}
+	if spy.gotSessionID != sid {
+		t.Fatalf("sessionID %q, want %q", spy.gotSessionID, sid)
+	}
+	if spy.gotN != 2 || spy.gotExt != "999" || spy.gotSource != platformSource {
+		t.Fatalf("spy: %+v", spy)
 	}
 }
