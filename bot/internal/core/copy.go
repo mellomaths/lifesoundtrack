@@ -15,7 +15,8 @@ var (
 		"• /help — this list, with " + productName + " in context\n" +
 		"• /ping — a tiny liveness line so you know I'm responding\n" +
 		"• /album <line> — save a release: free text (title or artist), or paste a Spotify album URL / share short link\n" +
-		"• /list — your saved albums (5 per page); optional /list <artist> to filter; use Back/Next or /list next and /list back when there are more pages\n"
+		"• /list — your saved albums (5 per page); optional /list <artist> to filter; use Back/Next or /list next and /list back when there are more pages\n" +
+		"• /remove <name> — remove one saved album (exact title or a shorter phrase in the title; reply with a number to pick; if more than 3 match, the bot asks for a more specific search)\n"
 
 	pingCopy = "pong — " + productName + " is up."
 

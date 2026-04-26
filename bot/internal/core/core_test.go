@@ -47,6 +47,9 @@ func TestReply(t *testing.T) {
 	if !strings.Contains(help, "/start") || !strings.Contains(help, "/help") || !strings.Contains(help, "/ping") || !strings.Contains(help, "/album") {
 		t.Errorf("help must list supported commands, got: %q", help)
 	}
+	if !strings.Contains(help, "/remove") {
+		t.Errorf("help must list /remove, got: %q", help)
+	}
 	if !strings.Contains(strings.ToLower(help), "spotify") {
 		t.Errorf("help should mention Spotify album/share links, got: %q", help)
 	}

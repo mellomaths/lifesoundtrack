@@ -152,6 +152,9 @@ func TestProcessAlbumQuery_SingleMatchSaves(t *testing.T) {
 	if st.insertCalls != 1 {
 		t.Fatalf("inserts %d", st.insertCalls)
 	}
+	if st.deleteListenerDis != 1 {
+		t.Fatalf("expected stale disambig cleared before single save, deleteListenerDis=%d", st.deleteListenerDis)
+	}
 }
 
 func TestProcessAlbumQuery_SingleMatch_SpotifyProvider(t *testing.T) {
@@ -174,6 +177,9 @@ func TestProcessAlbumQuery_SingleMatch_SpotifyProvider(t *testing.T) {
 	}
 	if st.insertCalls != 1 {
 		t.Fatalf("inserts %d", st.insertCalls)
+	}
+	if st.deleteListenerDis != 1 {
+		t.Fatalf("deleteListenerDis=%d", st.deleteListenerDis)
 	}
 }
 
@@ -201,6 +207,9 @@ func TestProcessAlbumQuery_DuplicateUserVisibleLabelSavesFirst(t *testing.T) {
 	}
 	if len(st.disambigRaw) != 0 {
 		t.Fatalf("unexpected disambig session stored")
+	}
+	if st.deleteListenerDis != 1 {
+		t.Fatalf("deleteListenerDis=%d", st.deleteListenerDis)
 	}
 }
 
@@ -238,6 +247,9 @@ func TestProcessAlbumQuery_DisambigStoresTwo(t *testing.T) {
 	}
 	if st.insertCalls != 0 {
 		t.Fatalf("inserts before pick: %d", st.insertCalls)
+	}
+	if st.deleteListenerDis != 1 {
+		t.Fatalf("expected clear-before-disambig, deleteListenerDis=%d", st.deleteListenerDis)
 	}
 }
 
@@ -367,6 +379,9 @@ func TestProcessAlbumQuery_SpotifyAlbumURL_NoSearch(t *testing.T) {
 	if st.insertCalls != 1 {
 		t.Fatalf("inserts %d", st.insertCalls)
 	}
+	if st.deleteListenerDis != 1 {
+		t.Fatalf("deleteListenerDis=%d", st.deleteListenerDis)
+	}
 }
 
 func TestProcessAlbumQuery_EmbeddedSpotifyAlbumURL_NoSearch(t *testing.T) {
@@ -390,6 +405,9 @@ func TestProcessAlbumQuery_EmbeddedSpotifyAlbumURL_NoSearch(t *testing.T) {
 	}
 	if fs.searchCalls != 0 {
 		t.Fatalf("expected direct path, Search calls=%d", fs.searchCalls)
+	}
+	if st.deleteListenerDis != 1 {
+		t.Fatalf("deleteListenerDis=%d", st.deleteListenerDis)
 	}
 }
 
@@ -470,6 +488,9 @@ func TestProcessAlbumQuery_ShortShare_ResolveAndLookupE2E(t *testing.T) {
 	}
 	if st.insertCalls != 1 {
 		t.Fatalf("inserts %d", st.insertCalls)
+	}
+	if st.deleteListenerDis != 1 {
+		t.Fatalf("deleteListenerDis=%d", st.deleteListenerDis)
 	}
 }
 
