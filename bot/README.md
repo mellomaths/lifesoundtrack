@@ -1,13 +1,14 @@
 # LifeSoundtrack `bot/`
 
-- **`internal/core`**: product strings, `/album` save flow, and command semantics (no third-party chat SDKs).
+- **`internal/core`**: product strings, `/album` save flow, `/list` saved-album library, and command semantics (no third-party chat SDKs).
 - **`internal/adapter/telegram`**: first platform adapter; only this path imports `github.com/go-telegram/bot`.
 - **`internal/store`**: PostgreSQL (`pgxpool`) and migrations ([Goose](https://github.com/pressly/goose)).
 - **`internal/metadata`**: **Spotify → iTunes → Last.fm → MusicBrainz** (see `LST_METADATA_ENABLE_*` in [`.env.example`](./.env.example)) behind `MetadataOrchestrator`.
 - **`cmd/bot`**: process entry, config, logging, wires the active adapter and database.
 
 Feature **003** (save album): [specs/003-save-album-command/quickstart.md](../specs/003-save-album-command/quickstart.md).  
-Feature **005** (paste Spotify album or share link): [specs/005-save-album-spotify-url/quickstart.md](../specs/005-save-album-spotify-url/quickstart.md).
+Feature **005** (paste Spotify album or share link): [specs/005-save-album-spotify-url/quickstart.md](../specs/005-save-album-spotify-url/quickstart.md).  
+Feature **006** (`/list`, paging): [specs/006-list-saved-albums/quickstart.md](../specs/006-list-saved-albums/quickstart.md).
 
 ## Develop
 

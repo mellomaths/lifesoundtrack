@@ -71,8 +71,9 @@ func main() {
 		Log:                  log,
 	})
 	save := &core.SaveService{Store: st, Search: orch, Log: log}
+	lib := &core.LibraryService{Store: st}
 
-	tb, err := telegram.NewBot(log, cfg.TelegramBotToken, save)
+	tb, err := telegram.NewBot(log, cfg.TelegramBotToken, save, lib)
 	if err != nil {
 		log.Error("telegram bot init", "err", err)
 		os.Exit(1)

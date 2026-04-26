@@ -307,6 +307,15 @@ func dedupeCandidatesByAlbumLine(cands []AlbumCandidate) []AlbumCandidate {
 	return out
 }
 
+// FormatSavedAlbumLine formats a saved row like disambiguation labels (Title | Artist (Year)).
+func FormatSavedAlbumLine(title string, primaryArtist *string, year *int) string {
+	c := AlbumCandidate{Title: title, Year: year}
+	if primaryArtist != nil {
+		c.PrimaryArtist = *primaryArtist
+	}
+	return formatAlbumLine(c)
+}
+
 func formatAlbumLine(c AlbumCandidate) string {
 	var b strings.Builder
 	b.WriteString(c.Title)

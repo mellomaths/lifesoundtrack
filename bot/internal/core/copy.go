@@ -14,7 +14,8 @@ var (
 		"• /start — short welcome and where you are\n" +
 		"• /help — this list, with " + productName + " in context\n" +
 		"• /ping — a tiny liveness line so you know I'm responding\n" +
-		"• /album <line> — save a release: free text (title or artist), or paste a Spotify album URL / share short link\n"
+		"• /album <line> — save a release: free text (title or artist), or paste a Spotify album URL / share short link\n" +
+		"• /list — your saved albums (5 per page); optional /list <artist> to filter; use Back/Next or /list next and /list back when there are more pages\n"
 
 	pingCopy = "pong — " + productName + " is up."
 
