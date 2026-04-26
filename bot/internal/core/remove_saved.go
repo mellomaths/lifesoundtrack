@@ -3,10 +3,12 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"unicode/utf8"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/mellomaths/lifesoundtrack/bot/internal/store"
 )
 
@@ -31,13 +33,27 @@ type RemoveReply struct {
 	ButtonLabels      []string
 }
 
-// TryProcessRemovePick handles a 1..99 reply when the latest open disambiguation session is a /remove pick.
-// ok is false when the session is not a remove_saved session (caller may try /album pick).
+// TryProcessRemovePick handles a /remove disambiguation pick (1..99).
+//
+// sessionID is the disambiguation_sessions id from an inline rmp: callback; when empty, the text path uses
+// the latest open session only if it unmarshals to kind remove_saved (not album-save JSON).
+//
+// ok is false when there is nothing for the remove path to do (caller may try /album pick for plain "1"/"2").
 // When ok is true, text is always non-empty.
-func (lib *LibraryService) TryProcessRemovePick(ctx context.Context, source, externalID string, oneBased int) (text string, ok bool, err error) {
+func (lib *LibraryService) TryProcessRemovePick(ctx context.Context, source, externalID, sessionID string, oneBased int) (text string, ok bool, err error) {
 	if lib == nil || lib.Store == nil {
 		return "", false, fmt.Errorf("nil library service")
 	}
+	listenerID, err := lib.Store.ListenerIDBySourceExternal(ctx, source, externalID)
+	if err != nil {
+		return "", false, err
+	}
+
+	if sessionID != "" {
+		return lib.tryRemovePickKeyed(ctx, listenerID, sessionID, oneBased)
+	}
+
+	// Text path: latest open session must be remove_saved (never apply a remove index to album disambiguation).
 	sess, raw, err := lib.Store.LatestOpenDisambiguationSession(ctx, source, externalID)
 	if err != nil {
 		return "", false, err
@@ -49,19 +65,37 @@ func (lib *LibraryService) TryProcessRemovePick(ctx context.Context, source, ext
 	if jerr := json.Unmarshal(raw, &root); jerr != nil || root.Kind != removeDisambigKind {
 		return "", false, nil
 	}
+	return lib.finishRemovePickFromRoot(ctx, listenerID, sess.ID, &root, oneBased)
+}
+
+func (lib *LibraryService) tryRemovePickKeyed(ctx context.Context, listenerID, sessionID string, oneBased int) (text string, ok bool, err error) {
+	if listenerID == "" {
+		return removeNotFoundCopy(), true, nil
+	}
+	raw, err := lib.Store.OpenDisambiguationSessionForListener(ctx, sessionID, listenerID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return removePickKeyedStaleCopy(), true, nil
+		}
+		return "", false, err
+	}
+	var root removeDisambigRoot
+	if jerr := json.Unmarshal(raw, &root); jerr != nil || root.Kind != removeDisambigKind {
+		return removePickKeyedStaleCopy(), true, nil
+	}
+	return lib.finishRemovePickFromRoot(ctx, listenerID, sessionID, &root, oneBased)
+}
+
+func (lib *LibraryService) finishRemovePickFromRoot(ctx context.Context, listenerID, disambigSessionID string, root *removeDisambigRoot, oneBased int) (text string, ok bool, err error) {
 	if len(root.Candidates) == 0 {
-		_ = lib.Store.DeleteDisambiguationSession(ctx, sess.ID)
+		_ = lib.Store.DeleteDisambiguationSession(ctx, disambigSessionID)
 		return noActiveRemovePickCopy(), true, nil
 	}
 	if oneBased < 1 || oneBased > len(root.Candidates) {
 		return removePickRangeCopy(len(root.Candidates)), true, nil
 	}
-	listenerID, err := lib.Store.ListenerIDBySourceExternal(ctx, source, externalID)
-	if err != nil {
-		return "", true, err
-	}
 	if listenerID == "" {
-		_ = lib.Store.DeleteDisambiguationSession(ctx, sess.ID)
+		_ = lib.Store.DeleteDisambiguationSession(ctx, disambigSessionID)
 		return noActiveRemovePickCopy(), true, nil
 	}
 	cand := root.Candidates[oneBased-1]
@@ -70,10 +104,10 @@ func (lib *LibraryService) TryProcessRemovePick(ctx context.Context, source, ext
 		return "", true, err
 	}
 	if !deleted {
-		_ = lib.Store.DeleteDisambiguationSession(ctx, sess.ID)
+		_ = lib.Store.DeleteDisambiguationSession(ctx, disambigSessionID)
 		return removeNotFoundCopy(), true, nil
 	}
-	_ = lib.Store.DeleteDisambiguationSession(ctx, sess.ID)
+	_ = lib.Store.DeleteDisambiguationSession(ctx, disambigSessionID)
 	return "Removed: " + cand.Label, true, nil
 }
 
@@ -225,4 +259,8 @@ func removePickRangeCopy(n int) string {
 
 func noActiveRemovePickCopy() string {
 	return "No remove choice is open. Use /remove with the album you want to drop from your list."
+}
+
+func removePickKeyedStaleCopy() string {
+	return "That remove list is no longer available. Use /remove again if you still want to drop an album from your list."
 }

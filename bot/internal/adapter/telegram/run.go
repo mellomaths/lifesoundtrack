@@ -173,14 +173,23 @@ func handleListCallback(ctx context.Context, log *slog.Logger, b *bot.Bot, q *mo
 	_, _ = b.SendMessage(ctx, params)
 }
 
-func handleRemovePickCallback(ctx context.Context, log *slog.Logger, b *bot.Bot, q *models.CallbackQuery, chatID any, lib *core.LibraryService) {
-	_, n, ok := parseRemovePickCallbackData(q.Data)
+// removePickLibrary is satisfied by [*core.LibraryService]; used so tests can assert callback wiring.
+type removePickLibrary interface {
+	TryProcessRemovePick(ctx context.Context, source, externalID, sessionID string, oneBased int) (text string, handled bool, err error)
+}
+
+// tryRemovePickFromCallbackData parses rmp: data and delegates to core with the embedded session id.
+func tryRemovePickFromCallbackData(ctx context.Context, lib removePickLibrary, source, externalID, data string) (text string, handled bool, err error) {
+	sid, n, ok := parseRemovePickCallbackData(data)
 	if !ok {
-		_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{CallbackQueryID: q.ID})
-		return
+		return "", false, nil
 	}
+	return lib.TryProcessRemovePick(ctx, source, externalID, sid, n)
+}
+
+func handleRemovePickCallback(ctx context.Context, log *slog.Logger, b *bot.Bot, q *models.CallbackQuery, chatID any, lib removePickLibrary) {
 	ext, _, _ := userIdentity(&q.From)
-	text, handled, err := lib.TryProcessRemovePick(ctx, platformSource, ext, n)
+	text, handled, err := tryRemovePickFromCallbackData(ctx, lib, platformSource, ext, q.Data)
 	if err != nil {
 		log.Error("remove pick callback", "err", err)
 		_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{CallbackQueryID: q.ID})
@@ -339,7 +348,7 @@ func handleMessage(ctx context.Context, log *slog.Logger, b *bot.Bot, msg *model
 	}
 
 	if n, ok := core.RemovePickIndexFromText(text); ok {
-		msg, handled, err := lib.TryProcessRemovePick(ctx, platformSource, ext, n)
+		msg, handled, err := lib.TryProcessRemovePick(ctx, platformSource, ext, "", n)
 		if err != nil {
 			log.Error("remove pick", "err", err)
 			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, Text: internalErrCopy()})

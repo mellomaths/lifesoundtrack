@@ -29,3 +29,9 @@ func nullIfEmpty(s string) *string {
 	}
 	return &s
 }
+
+// DeleteListener removes a listener row; FK cascades delete saved_albums and disambiguation_sessions.
+func (s *Store) DeleteListener(ctx context.Context, listenerID string) error {
+	_, err := s.pool.Exec(ctx, `DELETE FROM listeners WHERE id = $1::uuid`, listenerID)
+	return err
+}

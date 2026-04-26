@@ -5,14 +5,9 @@ alwaysApply: true
 <!-- SPECKIT START -->
 For additional context about technologies, project structure, and shell commands,
 read the **active** feature from [`.specify/feature.json`](../../.specify/feature.json) (currently
-[`specs/007-remove-saved-album/spec.md`](../../specs/007-remove-saved-album/spec.md) and
-[`specs/007-remove-saved-album/plan.md`](../../specs/007-remove-saved-album/plan.md) + [`tasks.md`](../../specs/007-remove-saved-album/tasks.md) (when present): **`/remove`**: two-phase **title** **match** per **FR-003**; **Telegram** **disambig** **MUST** use **inline** **buttons** + **`rmp:`** **callbacks** (see [contracts/remove-command.md](../../specs/007-remove-saved-album/contracts/remove-command.md)), **text** **index** **pick** **alternate**; **no** **Artist**–**Title** **split** for **search**; **A3** like **`/album`**; **FR-008** **help**; **clear** **stale** **disambigs** on **single** **`/album`** **save** (plan / research **§8a**). See [research.md](../../specs/007-remove-saved-album/research.md) (§2, §2a, §4, §8–**§10**).
-
-Also see [`specs/006-list-saved-albums/spec.md`](../../specs/006-list-saved-albums/spec.md) and [`specs/006-list-saved-albums/plan.md`](../../specs/006-list-saved-albums/plan.md) for **`/list`**, **`album_list_sessions`**, **`lpl:`**; [`specs/005-save-album-spotify-url/plan.md`](../../specs/005-save-album-spotify-url/plan.md) for **`/album`** **SPOTIFY_URL** / **SHORT_URL** + **FREE_TEXT**; [`specs/003-save-album-command/plan.md`](../../specs/003-save-album-command/plan.md) for metadata **chain** + Postgres + **save** disambiguation; [`specs/004-daily-album-recommendations/plan.md`](../../specs/004-daily-album-recommendations/plan.md) for daily picks.
-
-The feature **001** sandbox runbook is at
-[`specs/001-lifesoundtrack-bot-commands/quickstart.md`](../../specs/001-lifesoundtrack-bot-commands/quickstart.md)
-for core Telegram / domain behavior.
+[`specs/008-bind-remove-pick-session/spec.md`](../../specs/008-bind-remove-pick-session/spec.md),
+[`specs/008-bind-remove-pick-session/plan.md`](../../specs/008-bind-remove-pick-session/plan.md), and
+[`specs/008-bind-remove-pick-session/tasks.md`](../../specs/008-bind-remove-pick-session/tasks.md) when present). **Feature 008** — **remove** disambig **picks** **MUST** **resolve** **`rmp:`** **callbacks** by **`disambiguation_sessions.id`** + **listener** (not **“latest”** only); see [contracts/remove-pick-binding.md](../../specs/008-bind-remove-pick-session/contracts/remove-pick-binding.md) and [research.md](../../specs/008-bind-remove-pick-session/research.md). **`/remove`** product behavior and **`rmp:`** **grammar** build on [007 `remove-command.md`](../../specs/007-remove-saved-album/contracts/remove-command.md) / [`/list`](../../specs/006-list-saved-albums/plan.md) / [`/album`](../../specs/003-save-album-command/plan.md); **001** [quickstart](../../specs/001-lifesoundtrack-bot-commands/quickstart.md) for Telegram / domain.
 
 The Go module for the bot is under `bot/`: keep **product behavior** in `bot/internal/core` and **platform-specific** code under `bot/internal/adapter/...` (e.g. Telegram first).
 <!-- SPECKIT END -->

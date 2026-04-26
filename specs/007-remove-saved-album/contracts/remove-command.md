@@ -1,6 +1,7 @@
 # Contract: `/remove` command (domain + Telegram)
 
-**Spec**: [spec.md](../spec.md) | **Plan**: [plan.md](../plan.md) | **Date**: 2026-04-26
+**Spec**: [spec.md](../spec.md) | **Plan**: [plan.md](../plan.md) | **Date**: 2026-04-26  
+**Inline picks**: Session binding for `rmp:` callbacks is defined in [008 remove-pick-binding.md](../../008-bind-remove-pick-session/contracts/remove-pick-binding.md).
 
 ## Command grammar (private chat)
 
