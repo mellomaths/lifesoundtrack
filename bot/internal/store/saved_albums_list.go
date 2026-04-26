@@ -158,6 +158,32 @@ func (s *Store) LatestOpenAlbumListSession(ctx context.Context, listenerID strin
 	return &r, nil
 }
 
+// ListSavedAlbumRowsForListener returns all saved rows for a listener (for /remove in-Go title matching).
+func (s *Store) ListSavedAlbumRowsForListener(ctx context.Context, listenerID string) ([]SavedAlbumListRow, error) {
+	if listenerID == "" {
+		return nil, nil
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT id::text, title, primary_artist, year
+		FROM saved_albums
+		WHERE listener_id = $1::uuid
+		ORDER BY created_at ASC, id ASC
+	`, listenerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []SavedAlbumListRow
+	for rows.Next() {
+		var r SavedAlbumListRow
+		if err := rows.Scan(&r.ID, &r.Title, &r.PrimaryArtist, &r.Year); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // UpdateAlbumListSessionPage updates the cursor page for text /list next|back and callback navigation.
 func (s *Store) UpdateAlbumListSessionPage(ctx context.Context, sessionID string, page int) error {
 	_, err := s.pool.Exec(ctx, `

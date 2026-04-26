@@ -15,7 +15,7 @@ import (
 
 const platformSource = "telegram"
 
-// NewBot builds a *bot.Bot with save-album and /list handlers. The same instance can be used for daily sends (T019).
+// NewBot builds a *bot.Bot with save-album, /list, and /remove handlers. The same instance can be used for daily sends.
 func NewBot(log *slog.Logger, token string, save *core.SaveService, lib *core.LibraryService) (*bot.Bot, error) {
 	if save == nil {
 		return nil, fmt.Errorf("nil save service")
@@ -70,6 +70,10 @@ func handleCallback(ctx context.Context, log *slog.Logger, b *bot.Bot, q *models
 	}
 	if strings.HasPrefix(q.Data, "lpl:") {
 		handleListCallback(ctx, log, b, q, chatID, lib)
+		return
+	}
+	if strings.HasPrefix(q.Data, "rmp:") {
+		handleRemovePickCallback(ctx, log, b, q, chatID, lib)
 		return
 	}
 	var n int
@@ -169,6 +173,50 @@ func handleListCallback(ctx context.Context, log *slog.Logger, b *bot.Bot, q *mo
 	_, _ = b.SendMessage(ctx, params)
 }
 
+func handleRemovePickCallback(ctx context.Context, log *slog.Logger, b *bot.Bot, q *models.CallbackQuery, chatID any, lib *core.LibraryService) {
+	_, n, ok := parseRemovePickCallbackData(q.Data)
+	if !ok {
+		_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{CallbackQueryID: q.ID})
+		return
+	}
+	ext, _, _ := userIdentity(&q.From)
+	text, handled, err := lib.TryProcessRemovePick(ctx, platformSource, ext, n)
+	if err != nil {
+		log.Error("remove pick callback", "err", err)
+		_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{CallbackQueryID: q.ID})
+		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, Text: internalErrCopy()})
+		return
+	}
+	if !handled {
+		_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{CallbackQueryID: q.ID})
+		return
+	}
+	_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{CallbackQueryID: q.ID})
+	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, Text: text})
+}
+
+// parseRemovePickCallbackData expects rmp:<uuid>:<1-based index> (index 1..99).
+func parseRemovePickCallbackData(data string) (sessionID string, oneBased int, ok bool) {
+	if !strings.HasPrefix(data, "rmp:") {
+		return "", 0, false
+	}
+	rest := strings.TrimPrefix(data, "rmp:")
+	i := strings.LastIndex(rest, ":")
+	if i <= 0 || i >= len(rest)-1 {
+		return "", 0, false
+	}
+	sessionID = rest[:i]
+	indexStr := rest[i+1:]
+	if sessionID == "" {
+		return "", 0, false
+	}
+	p, err := strconv.Atoi(indexStr)
+	if err != nil || p < 1 || p > 99 {
+		return "", 0, false
+	}
+	return sessionID, p, true
+}
+
 // parseListCallbackData expects lpl:<uuid>:<1-based page>.
 func parseListCallbackData(data string) (sessionID string, page int, ok bool) {
 	if !strings.HasPrefix(data, "lpl:") {
@@ -214,6 +262,23 @@ func listPaginationKeyboard(sessionID string, currentPage, totalPages int) *mode
 	return &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{row}}
 }
 
+// removeDisambigInlineKeyboard builds one row per candidate (FR-006); callback rmp:<session_id>:<1-based index>.
+func removeDisambigInlineKeyboard(sessionID string, labels []string) *models.InlineKeyboardMarkup {
+	if sessionID == "" || len(labels) == 0 {
+		return nil
+	}
+	rows := make([][]models.InlineKeyboardButton, 0, len(labels))
+	for i, lab := range labels {
+		// "rmp:"+uuid(36)+":"+index(1-2) fits Telegram's 64-byte callback_data limit.
+		data := "rmp:" + sessionID + ":" + strconv.Itoa(i+1)
+		rows = append(rows, []models.InlineKeyboardButton{{
+			Text:         truncateForButton(lab),
+			CallbackData: data,
+		}})
+	}
+	return &models.InlineKeyboardMarkup{InlineKeyboard: rows}
+}
+
 func handleMessage(ctx context.Context, log *slog.Logger, b *bot.Bot, msg *models.Message, save *core.SaveService, lib *core.LibraryService) {
 	if msg == nil || msg.From == nil {
 		return
@@ -256,6 +321,34 @@ func handleMessage(ctx context.Context, log *slog.Logger, b *bot.Bot, msg *model
 		}
 		_, _ = b.SendMessage(ctx, params)
 		return
+	}
+
+	if rem, ok := core.ParseRemoveLine(text); ok {
+		rr, err := lib.HandleRemove(ctx, platformSource, ext, rem)
+		if err != nil {
+			log.Error("remove", "err", err)
+			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, Text: internalErrCopy()})
+			return
+		}
+		params := &bot.SendMessageParams{ChatID: chatID, Text: rr.Text}
+		if rr.DisambigSessionID != "" && len(rr.ButtonLabels) > 0 {
+			params.ReplyMarkup = removeDisambigInlineKeyboard(rr.DisambigSessionID, rr.ButtonLabels)
+		}
+		_, _ = b.SendMessage(ctx, params)
+		return
+	}
+
+	if n, ok := core.RemovePickIndexFromText(text); ok {
+		msg, handled, err := lib.TryProcessRemovePick(ctx, platformSource, ext, n)
+		if err != nil {
+			log.Error("remove pick", "err", err)
+			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, Text: internalErrCopy()})
+			return
+		}
+		if handled {
+			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, Text: msg})
+			return
+		}
 	}
 
 	if n, ok := core.OneBasedPickFromText(text); ok {

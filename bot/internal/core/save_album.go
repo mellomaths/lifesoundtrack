@@ -243,6 +243,14 @@ func (s *SaveService) persistSave(
 	if err != nil {
 		return "", UserMessage{}, err
 	}
+	// Single-result and Spotify-direct saves are not part of the active [AlbumCandidate] disambig
+	// session. Clear any stale sessions (e.g. a prior /remove pick list) so a later "1" message
+	// cannot be interpreted as a remove.
+	if disambigID == nil {
+		if err := s.Store.DeleteDisambigForListener(ctx, listenerID); err != nil {
+			return "", UserMessage{}, err
+		}
+	}
 	savedID, err := s.Store.InsertSavedAlbum(ctx, store.InsertSavedAlbumParams{
 		ListenerID:      listenerID,
 		UserQueryText:   strOrNil(userQuery),
